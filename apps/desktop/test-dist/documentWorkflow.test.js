@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getDocumentFileName, upsertRecentDocument } from "./documentWorkflow.js";
+import { clampParagraphIndex, clampReadingSpeed, getDocumentFileName, parseReaderPersistenceState, upsertRecentDocument } from "./documentWorkflow.js";
 test("getDocumentFileName returns the last path segment", () => {
     assert.equal(getDocumentFileName("C:\\docs\\Biology Chapter 3.txt"), "Biology Chapter 3.txt");
     assert.equal(getDocumentFileName("/tmp/notes.pdf"), "notes.pdf");
@@ -51,4 +51,51 @@ test("upsertRecentDocument deduplicates by file path and moves reopened files to
             lastOpenedAt: 2000
         }
     ]);
+});
+test("parseReaderPersistenceState returns safe defaults for invalid data", () => {
+    assert.deepEqual(parseReaderPersistenceState("{not valid json"), {
+        recentDocuments: [],
+        readingSpeed: 1,
+        lastOpenedDocumentPath: null,
+        lastOpenedParagraphIndex: 0
+    });
+});
+test("parseReaderPersistenceState keeps only valid persisted reader values", () => {
+    const parsed = parseReaderPersistenceState(JSON.stringify({
+        recentDocuments: [
+            {
+                fileName: "Notes.txt",
+                filePath: "C:\\docs\\Notes.txt",
+                fileType: "txt",
+                lastOpenedAt: 1200
+            },
+            {
+                fileName: "Broken",
+                filePath: 4
+            }
+        ],
+        readingSpeed: 2.7,
+        lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
+        lastOpenedParagraphIndex: 4.8
+    }));
+    assert.deepEqual(parsed, {
+        recentDocuments: [
+            {
+                fileName: "Notes.txt",
+                filePath: "C:\\docs\\Notes.txt",
+                fileType: "txt",
+                lastOpenedAt: 1200
+            }
+        ],
+        readingSpeed: 2,
+        lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
+        lastOpenedParagraphIndex: 4
+    });
+});
+test("reading and paragraph clamps keep persisted values in range", () => {
+    assert.equal(clampReadingSpeed(0.2), 0.5);
+    assert.equal(clampReadingSpeed(1.26), 1.3);
+    assert.equal(clampReadingSpeed(4), 2);
+    assert.equal(clampParagraphIndex(-3), 0);
+    assert.equal(clampParagraphIndex(7.9), 7);
 });

@@ -89,6 +89,11 @@ When a document is loaded, Phronon also splits the extracted text into readable 
 ## Reader keyboard shortcuts
 The Reader screen also supports keyboard-first controls for core actions. `Ctrl+O` opens the document picker, `Space` starts, pauses, or resumes reading from the current paragraph, `S` stops playback, `J` moves to the next paragraph, `K` moves to the previous paragraph, `R` repeats only the current paragraph, and `Alt+Up` or `Alt+Down` adjust the reading speed. These shortcuts intentionally stay inactive while a form control such as the reading speed slider or a button has focus so normal keyboard behavior is preserved.
 
+## Reader persistence
+The desktop app now keeps a small local reader snapshot in the Electron renderer so study context survives restarts without any cloud service or new dependency. Phronon remembers the recent documents list, the current reading speed, the last opened document path, and the last active paragraph for that document.
+
+On launch, Phronon restores the recent documents list and reading speed immediately. If the last opened file can still be read, the app reopens it and restores the saved paragraph position. If the file has moved, been deleted, or cannot be reopened, Phronon fails softly by leaving the app usable and showing the normal loading error instead of blocking the interface.
+
 ## Manual test steps
 1. Run `npm run dev` from the repository root.
 2. Run `python -m pip install -e ./backend` from the repository root if you have not installed the backend dependency yet.
@@ -113,7 +118,10 @@ The Reader screen also supports keyboard-first controls for core actions. `Ctrl+
 21. While playback is active, change the reading speed slider or press `Alt+Up` or `Alt+Down` and confirm the status says the new speed will apply on the next paragraph without restarting the current paragraph immediately.
 22. Pause playback, change the reading speed, press `Play`, and confirm playback resumes from the current paragraph at the new speed.
 23. With no file loaded, press `Play`, `Space`, or `R` and confirm the app shows a clear status message.
+24. Open a document, move to a later paragraph, change the reading speed, restart the app, and confirm the recent list and reading speed are restored.
+25. If the same document still exists, confirm it reopens and the highlighted paragraph returns to the saved position.
+26. Rename or remove the last opened file, restart the app, and confirm Phronon stays usable while showing a clear load failure.
 
 ## Next steps
 - Add local text extraction pipeline
-- Add persistence for reading state
+- Expand persistence coverage only when it improves accessibility and remains easy to maintain
