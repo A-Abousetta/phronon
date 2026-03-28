@@ -86,6 +86,18 @@ type ReaderDocumentState = {
 
 type PlaybackState = "idle" | "playing" | "paused";
 
+function isInteractiveElement(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest(
+      'input, textarea, select, button, [contenteditable="true"], [role="textbox"], [role="slider"]'
+    )
+  );
+}
+
 function ReaderScreen() {
   const [documentState, setDocumentState] = useState<ReaderDocumentState>({
     filePath: null,
@@ -243,6 +255,42 @@ function ReaderScreen() {
     setPlaybackMessage("Playback stopped.");
   }
 
+  useEffect(() => {
+    function handleReaderKeydown(event: KeyboardEvent) {
+      if (isInteractiveElement(event.target)) {
+        return;
+      }
+
+      if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        void handleOpenFile();
+        return;
+      }
+
+      if (event.key === " " || event.code === "Space") {
+        event.preventDefault();
+
+        if (playbackState === "playing") {
+          handlePause();
+        } else {
+          handlePlay();
+        }
+        return;
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        handleStop();
+      }
+    }
+
+    window.addEventListener("keydown", handleReaderKeydown);
+
+    return () => {
+      window.removeEventListener("keydown", handleReaderKeydown);
+    };
+  }, [playbackState, playbackRate, documentState.text]);
+
   const statusMessage = documentState.error
     ? documentState.error
     : documentState.filePath
@@ -252,6 +300,16 @@ function ReaderScreen() {
   const hasText = Boolean(documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
   const speedValueId = useId();
+  const statusToneClass = documentState.error || !speechSynthesisAvailable ? "status-message error-text" : "status-message";
+  const playbackStatusLabel = !documentState.text
+    ? "waiting for a file"
+    : playbackState === "playing"
+      ? "playing"
+      : playbackState === "paused"
+        ? "paused"
+        : playbackMessage === "Playback stopped."
+          ? "stopped"
+          : "ready";
 
   return (
     <div className="screen-grid">
@@ -294,6 +352,7 @@ function ReaderScreen() {
         description="Use local device speech to read the loaded text aloud."
       >
         <div className="controls" role="group" aria-label="Playback controls">
+          <p className="hint">Shortcuts: Ctrl+O opens a text file, Space plays or pauses, and S stops playback.</p>
           <button type="button" onClick={handlePlay} aria-describedby="playback-status">
             {playbackState === "paused" ? "Resume" : "Play"}
           </button>
@@ -328,10 +387,12 @@ function ReaderScreen() {
           </label>
           <p
             id="playback-status"
-            className={!hasText || !speechSynthesisAvailable ? "status-message error-text" : "status-message"}
+            className={statusToneClass}
+            role="status"
             aria-live="polite"
+            aria-atomic="true"
           >
-            {playbackMessage}
+            <strong>Playback status:</strong> {playbackStatusLabel}. {playbackMessage}
           </p>
         </div>
       </SectionCard>
