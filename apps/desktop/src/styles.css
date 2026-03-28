@@ -183,6 +183,23 @@ button {
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   background: #fbfdff;
+  overflow: auto;
+}
+
+.reader-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+
+.status-message,
+.empty-state {
+  margin: 0;
+}
+
+.error-text {
+  color: #9f1c1c;
 }
 
 .field {

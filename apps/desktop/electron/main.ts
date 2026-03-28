@@ -1,4 +1,5 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,7 +14,9 @@ function createWindow() {
     minHeight: 640,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js")
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false
     }
   });
 
@@ -25,6 +28,54 @@ function createWindow() {
     void window.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 }
+
+ipcMain.handle("reader:open-text-document", async () => {
+  const window = BrowserWindow.getFocusedWindow();
+  const result = window
+    ? await dialog.showOpenDialog(window, {
+        title: "Open a text document",
+        properties: ["openFile"],
+        filters: [
+          {
+            name: "Text files",
+            extensions: ["txt"]
+          }
+        ]
+      })
+    : await dialog.showOpenDialog({
+        title: "Open a text document",
+        properties: ["openFile"],
+        filters: [
+          {
+            name: "Text files",
+            extensions: ["txt"]
+          }
+        ]
+      });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return {
+      canceled: true
+    };
+  }
+
+  const [filePath] = result.filePaths;
+
+  try {
+    const text = await readFile(filePath, "utf8");
+
+    return {
+      canceled: false,
+      filePath,
+      text
+    };
+  } catch {
+    return {
+      canceled: false,
+      error: "Phronon could not read that text file. Please choose a readable .txt file and try again."
+    };
+  }
+});
 
 app.whenReady().then(() => {
   createWindow();

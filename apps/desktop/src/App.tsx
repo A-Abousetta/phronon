@@ -77,18 +77,103 @@ function HomeScreen() {
   );
 }
 
+type ReaderDocumentState = {
+  filePath: string | null;
+  text: string | null;
+  error: string | null;
+  isLoading: boolean;
+};
+
 function ReaderScreen() {
+  const [documentState, setDocumentState] = useState<ReaderDocumentState>({
+    filePath: null,
+    text: null,
+    error: null,
+    isLoading: false
+  });
+
+  async function handleOpenFile() {
+    setDocumentState((current) => ({
+      ...current,
+      error: null,
+      isLoading: true
+    }));
+
+    try {
+      const result = await window.phronon.openTextDocument();
+
+      if (result.canceled) {
+        setDocumentState((current) => ({
+          ...current,
+          error: null,
+          isLoading: false
+        }));
+        return;
+      }
+
+      if (result.error) {
+        setDocumentState((current) => ({
+          ...current,
+          error: result.error,
+          isLoading: false
+        }));
+        return;
+      }
+
+      setDocumentState({
+        filePath: result.filePath ?? null,
+        text: result.text ?? null,
+        error: null,
+        isLoading: false
+      });
+    } catch {
+      setDocumentState((current) => ({
+        ...current,
+        error: "Phronon could not open the selected file.",
+        isLoading: false
+      }));
+    }
+  }
+
+  const statusMessage = documentState.error
+    ? documentState.error
+    : documentState.filePath
+      ? `Loaded file: ${documentState.filePath}`
+      : "No text file loaded yet.";
+
   return (
     <div className="screen-grid">
       <SectionCard
+        title="Open a text document"
+        description="Choose a plain text file and read it directly in the accessible reader area."
+      >
+        <div className="stack">
+          <button
+            className="primary-button"
+            type="button"
+            onClick={handleOpenFile}
+            disabled={documentState.isLoading}
+          >
+            {documentState.isLoading ? "Opening text file..." : "Open .txt file"}
+          </button>
+          <p className={documentState.error ? "status-message error-text" : "status-message"} aria-live="polite">
+            {statusMessage}
+          </p>
+        </div>
+      </SectionCard>
+
+      <SectionCard
         title="Document text"
-        description="This placeholder represents extracted text ready for reading or playback."
+        description="The full contents of the selected .txt file appear here."
       >
         <div className="reader-panel" tabIndex={0} aria-label="Document text area">
-          <p>
-            Imported text will appear here. The reader will support structured headings,
-            keyboard navigation, and clear focus order for screen readers.
-          </p>
+          {documentState.text ? (
+            <pre className="reader-text">{documentState.text}</pre>
+          ) : (
+            <p className="empty-state">
+              No file is loaded. Use the &quot;Open .txt file&quot; button to choose a plain text document.
+            </p>
+          )}
         </div>
       </SectionCard>
 

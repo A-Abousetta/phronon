@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const desktopDir = new URL("../apps/desktop/", import.meta.url);
 const desktopPath = fileURLToPath(desktopDir);
-const rendererUrl = "http://127.0.0.1:5173";
+const rendererUrl = "http://localhost:5173";
 const children = [];
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 

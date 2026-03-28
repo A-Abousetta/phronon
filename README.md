@@ -68,11 +68,13 @@ npm run build
 - Project scaffold
 - Basic Electron window
 - React UI for Home, Reader, and Settings
-- Placeholder areas for import, document text, and playback controls
+- Reader support for opening and displaying local `.txt` files
 - Minimal backend package layout for later document processing
 
+## Reader text loading
+The Reader screen now includes an `Open .txt file` action that opens the native file picker, reads the selected plain text file through Electron, and displays the full text in the reader area. If no file is loaded, the screen explains what to do next. If file reading fails, the app shows a clear error message.
+
 ## Next steps
-- Add file import wiring
 - Add local text extraction pipeline
 - Add text-to-speech playback
 - Add persistence for reading state
