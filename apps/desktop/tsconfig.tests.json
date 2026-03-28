@@ -8,5 +8,10 @@
     "rootDir": "./src",
     "types": ["node"]
   },
-  "include": ["src/readerControls.ts", "src/readerControls.test.ts"]
+  "include": [
+    "src/readerControls.ts",
+    "src/readerControls.test.ts",
+    "src/documentWorkflow.ts",
+    "src/documentWorkflow.test.ts"
+  ]
 }

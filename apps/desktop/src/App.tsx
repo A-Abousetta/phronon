@@ -6,6 +6,14 @@ import {
   splitIntoParagraphs,
   splitParagraphIntoSpeechChunks
 } from "./readerControls";
+import {
+  createLoadedDocumentState,
+  emptyReaderDocumentState,
+  getDocumentFileName,
+  type ReaderDocumentState,
+  type RecentDocument,
+  upsertRecentDocument
+} from "./documentWorkflow";
 
 type ScreenId = "home" | "reader" | "settings";
 
@@ -55,7 +63,12 @@ function SectionCard(props: {
   );
 }
 
-function HomeScreen() {
+function HomeScreen(props: {
+  documentState: ReaderDocumentState;
+  recentDocuments: RecentDocument[];
+  onImportFile: () => Promise<void>;
+  onOpenRecentDocument: (filePath: string) => Promise<void>;
+}) {
   return (
     <section className="page-workspace" aria-label="Home workspace">
       <div className="page-banner">
@@ -66,8 +79,8 @@ function HomeScreen() {
             Keep import and recent material close at hand in a simple, keyboard-first workspace.
           </p>
         </div>
-        <button className="primary-button" type="button">
-          Import File
+        <button className="primary-button" type="button" onClick={() => void props.onImportFile()} disabled={props.documentState.isLoading}>
+          {props.documentState.isLoading ? "Opening document..." : "Import File"}
         </button>
       </div>
 
@@ -79,6 +92,13 @@ function HomeScreen() {
             <p>Bring in a file and move into reading with as few steps as possible.</p>
           </div>
           <div className="stack">
+            <p className={props.documentState.error ? "status-message error-text compact-status" : "status-message compact-status"}>
+              {props.documentState.error
+                ? props.documentState.error
+                : props.documentState.filePath
+                  ? `Current document: ${getDocumentFileName(props.documentState.filePath)}.`
+                  : "No document is loaded yet."}
+            </p>
             <p className="hint">Planned support: TXT, PDF, and image files.</p>
           </div>
         </section>
@@ -89,24 +109,31 @@ function HomeScreen() {
             <h3 id="home-recent-title">Continue where you left off</h3>
             <p>Recent study material stays visible without taking over the screen.</p>
           </div>
-          <ul className="simple-list" aria-label="Recent documents">
-            <li>Biology Chapter 3.txt</li>
-            <li>Arabic Literature Notes.pdf</li>
-            <li>World History Scan.jpg</li>
-          </ul>
+          {props.recentDocuments.length > 0 ? (
+            <ul className="simple-list" aria-label="Recent documents">
+              {props.recentDocuments.map((document) => (
+                <li key={document.filePath}>
+                  <button
+                    type="button"
+                    className="recent-document-button"
+                    onClick={() => void props.onOpenRecentDocument(document.filePath)}
+                  >
+                    <span className="recent-document-name">{document.fileName}</span>
+                    <span className="recent-document-meta">
+                      {document.fileType.toUpperCase()} file
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="hint">No recent documents yet. Import a TXT or PDF file to see it here.</p>
+          )}
         </section>
       </div>
     </section>
   );
 }
-
-type ReaderDocumentState = {
-  filePath: string | null;
-  text: string | null;
-  fileType: "txt" | "pdf" | null;
-  error: string | null;
-  isLoading: boolean;
-};
 
 type PlaybackState = "idle" | "playing" | "paused";
 
@@ -120,14 +147,48 @@ type PlaybackPosition = {
   chunkIndex: number;
 };
 
-function ReaderScreen() {
-  const [documentState, setDocumentState] = useState<ReaderDocumentState>({
-    filePath: null,
-    text: null,
-    fileType: null,
-    error: null,
-    isLoading: false
-  });
+type OpenDocumentResult =
+  | {
+      canceled: true;
+    }
+  | {
+      canceled: false;
+      filePath: string;
+      text: string;
+      fileType: "txt" | "pdf";
+      error?: undefined;
+    }
+  | {
+      canceled: false;
+      error: string;
+      filePath?: undefined;
+      text?: undefined;
+      fileType?: undefined;
+    };
+
+type OpenDocumentSuccessResult = Extract<
+  OpenDocumentResult,
+  {
+    canceled: false;
+    filePath: string;
+    text: string;
+    fileType: "txt" | "pdf";
+  }
+>;
+
+function isOpenDocumentSuccessResult(result: OpenDocumentResult): result is OpenDocumentSuccessResult {
+  return (
+    result.canceled === false &&
+    "filePath" in result &&
+    "text" in result &&
+    "fileType" in result
+  );
+}
+
+function ReaderScreen(props: {
+  documentState: ReaderDocumentState;
+  onOpenDocument: () => Promise<void>;
+}) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
   const [playbackRate, setPlaybackRate] = useState(1);
   const [playbackMessage, setPlaybackMessage] = useState(
@@ -147,7 +208,7 @@ function ReaderScreen() {
     return Math.min(2, Math.max(0.5, Math.round(value * 10) / 10));
   }
 
-  const paragraphs = splitIntoParagraphs(documentState.text);
+  const paragraphs = splitIntoParagraphs(props.documentState.text);
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0);
 
   useEffect(() => {
@@ -329,15 +390,15 @@ function ReaderScreen() {
     window.speechSynthesis.cancel();
     setPlaybackState("idle");
     setPlaybackMessage(
-      documentState.text
+      props.documentState.text
         ? "Text is ready to play."
         : "Load a .txt or text-based .pdf file to start playback."
     );
-  }, [documentState.text]);
+  }, [props.documentState.text]);
 
   useEffect(() => {
     setCurrentParagraphIndex(0);
-  }, [documentState.text]);
+  }, [props.documentState.text]);
 
   useEffect(() => {
     if (paragraphs.length === 0) {
@@ -365,51 +426,11 @@ function ReaderScreen() {
   }, []);
 
   async function handleOpenFile() {
-    setDocumentState((current) => ({
-      ...current,
-      error: null,
-      isLoading: true
-    }));
-
-    try {
-      const result = await window.phronon.openReaderDocument();
-
-      if (result.canceled) {
-        setDocumentState((current) => ({
-          ...current,
-          error: null,
-          isLoading: false
-        }));
-        return;
-      }
-
-      if (result.error) {
-        setDocumentState((current) => ({
-          ...current,
-          error: result.error,
-          isLoading: false
-        }));
-        return;
-      }
-
-      setDocumentState({
-        filePath: result.filePath ?? null,
-        text: result.text ?? null,
-        fileType: "fileType" in result ? result.fileType : null,
-        error: null,
-        isLoading: false
-      });
-    } catch {
-      setDocumentState((current) => ({
-        ...current,
-        error: "Phronon could not open the selected file.",
-        isLoading: false
-      }));
-    }
+    await props.onOpenDocument();
   }
 
   function handlePlay() {
-    if (!documentState.text?.trim()) {
+    if (!props.documentState.text?.trim()) {
       setPlaybackState("idle");
       setPlaybackMessage("Load a .txt or text-based .pdf file before starting playback.");
       return;
@@ -573,19 +594,19 @@ function ReaderScreen() {
     return () => {
       window.removeEventListener("keydown", handleReaderKeydown);
     };
-  }, [paragraphs.length, documentState.text, currentParagraphIndex]);
+  }, [paragraphs.length, props.documentState.text, currentParagraphIndex]);
 
-  const statusMessage = documentState.error
-    ? documentState.error
-    : documentState.filePath
-      ? `Loaded ${documentState.fileType === "pdf" ? "PDF" : "text"} file: ${documentState.filePath}. Paragraph ${Math.min(currentParagraphIndex + 1, Math.max(paragraphs.length, 1))} of ${paragraphs.length || 0}.`
+  const statusMessage = props.documentState.error
+    ? props.documentState.error
+    : props.documentState.filePath
+      ? `Loaded ${props.documentState.fileType === "pdf" ? "PDF" : "text"} file: ${props.documentState.filePath}. Paragraph ${Math.min(currentParagraphIndex + 1, Math.max(paragraphs.length, 1))} of ${paragraphs.length || 0}.`
       : "No document loaded. Paragraph 0 of 0.";
 
-  const hasText = Boolean(documentState.text?.trim());
+  const hasText = Boolean(props.documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
   const speedValueId = useId();
-  const statusToneClass = documentState.error || !speechSynthesisAvailable ? "status-message error-text" : "status-message";
-  const playbackStatusLabel = !documentState.text
+  const statusToneClass = props.documentState.error || !speechSynthesisAvailable ? "status-message error-text" : "status-message";
+  const playbackStatusLabel = !props.documentState.text
     ? "waiting for a file"
     : playbackState === "playing"
       ? "playing"
@@ -594,8 +615,8 @@ function ReaderScreen() {
         : playbackMessage === "Playback stopped."
           ? "stopped"
           : "ready";
-  const fileLabel = documentState.filePath ? documentState.filePath.split(/[\\/]/).pop() ?? documentState.filePath : "No file loaded";
-  const fileTypeLabel = documentState.fileType === "pdf" ? "PDF" : documentState.fileType === "txt" ? "TXT" : "No file";
+  const fileLabel = props.documentState.filePath ? props.documentState.filePath.split(/[\\/]/).pop() ?? props.documentState.filePath : "No file loaded";
+  const fileTypeLabel = props.documentState.fileType === "pdf" ? "PDF" : props.documentState.fileType === "txt" ? "TXT" : "No file";
 
   function moveToParagraph(direction: "previous" | "next") {
     setCurrentParagraphIndex((currentIndex) => {
@@ -623,9 +644,9 @@ function ReaderScreen() {
             className="primary-button"
             type="button"
             onClick={handleOpenFile}
-            disabled={documentState.isLoading}
+            disabled={props.documentState.isLoading}
           >
-            {documentState.isLoading ? "Opening document..." : "Open file"}
+            {props.documentState.isLoading ? "Opening document..." : "Open file"}
           </button>
         </div>
 
@@ -639,10 +660,10 @@ function ReaderScreen() {
                 : "Paragraph 0 of 0"}
             </span>
             <span className="reader-chip">
-              {documentState.isLoading ? "Loading" : playbackStatusLabel === "waiting for a file" ? "Ready to load" : playbackStatusLabel}
+              {props.documentState.isLoading ? "Loading" : playbackStatusLabel === "waiting for a file" ? "Ready to load" : playbackStatusLabel}
             </span>
           </div>
-          <p className={documentState.error ? "status-message error-text compact-status" : "status-message compact-status"}>
+          <p className={props.documentState.error ? "status-message error-text compact-status" : "status-message compact-status"}>
             {statusMessage}
           </p>
         </div>
@@ -820,7 +841,73 @@ function SettingsScreen() {
 
 export function App() {
   const [activeScreen, setActiveScreen] = useState<ScreenId>("home");
+  const [documentState, setDocumentState] = useState<ReaderDocumentState>(emptyReaderDocumentState);
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
   const currentScreen = screens.find((screen) => screen.id === activeScreen)!;
+
+  async function loadDocument(options?: {
+    filePath?: string;
+    navigateToReader?: boolean;
+  }) {
+    const navigateToReader = options?.navigateToReader ?? false;
+
+    if (navigateToReader) {
+      setActiveScreen("reader");
+    }
+
+    setDocumentState((current) => ({
+      ...current,
+      error: null,
+      isLoading: true
+    }));
+
+    try {
+      const result: OpenDocumentResult = options?.filePath
+        ? await window.phronon.openDocumentAtPath(options.filePath)
+        : await window.phronon.openReaderDocument();
+
+      if (result.canceled) {
+        setDocumentState((current) => ({
+          ...current,
+          error: null,
+          isLoading: false
+        }));
+        return;
+      }
+
+      if ("error" in result && result.error) {
+        setDocumentState((current) => ({
+          ...current,
+          error: result.error,
+          isLoading: false
+        }));
+        return;
+      }
+
+      if (!isOpenDocumentSuccessResult(result)) {
+        setDocumentState((current) => ({
+          ...current,
+          error: "Phronon could not open the selected file.",
+          isLoading: false
+        }));
+        return;
+      }
+
+      const nextDocumentState = createLoadedDocumentState(result);
+      setDocumentState(nextDocumentState);
+      setRecentDocuments((current) => upsertRecentDocument(current, result));
+
+      if (navigateToReader) {
+        setActiveScreen("reader");
+      }
+    } catch {
+      setDocumentState((current) => ({
+        ...current,
+        error: "Phronon could not open the selected file.",
+        isLoading: false
+      }));
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -857,8 +944,20 @@ export function App() {
         </nav>
 
         <main id="main-content" className="main-panel" tabIndex={-1}>
-          {activeScreen === "home" && <HomeScreen />}
-          {activeScreen === "reader" && <ReaderScreen />}
+          {activeScreen === "home" && (
+            <HomeScreen
+              documentState={documentState}
+              recentDocuments={recentDocuments}
+              onImportFile={() => loadDocument({ navigateToReader: true })}
+              onOpenRecentDocument={(filePath) => loadDocument({ filePath, navigateToReader: true })}
+            />
+          )}
+          {activeScreen === "reader" && (
+            <ReaderScreen
+              documentState={documentState}
+              onOpenDocument={() => loadDocument()}
+            />
+          )}
           {activeScreen === "settings" && <SettingsScreen />}
         </main>
       </div>
