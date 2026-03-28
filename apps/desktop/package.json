@@ -1,0 +1,27 @@
+{
+  "name": "@phronon/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "renderer:dev": "vite",
+    "electron:dev": "tsc -p tsconfig.electron.json && electron dist-electron/main.js",
+    "build": "tsc -p tsconfig.electron.json && vite build",
+    "start": "electron dist-electron/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.1",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.3",
+    "electron": "^38.1.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.7"
+  }
+}

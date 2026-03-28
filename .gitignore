@@ -2,9 +2,11 @@ desktop.ini
 node_modules/
 dist/
 build/
+apps/desktop/dist-electron/
 .venv/
 venv/
 __pycache__/
 *.pyc
 .env
 .DS_Store
+*.egg-info/
