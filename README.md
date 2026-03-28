@@ -69,12 +69,26 @@ npm run build
 - Basic Electron window
 - React UI for Home, Reader, and Settings
 - Reader support for opening and displaying local `.txt` files
+- Reader playback controls backed by local browser/Electron speech synthesis
 - Minimal backend package layout for later document processing
 
 ## Reader text loading
 The Reader screen now includes an `Open .txt file` action that opens the native file picker, reads the selected plain text file through Electron, and displays the full text in the reader area. If no file is loaded, the screen explains what to do next. If file reading fails, the app shows a clear error message.
 
+## Reader text-to-speech playback
+The Reader screen now supports local text-to-speech playback for the currently loaded `.txt` content using the built-in speech synthesis available in the Electron renderer. `Play` starts or resumes reading, `Pause` pauses the current speech, `Stop` cancels it, and the reading speed slider adjusts the playback rate for new speech. If no text is loaded, the app announces a clear status message instead of failing silently.
+
+## Manual test steps
+1. Run `npm run dev` from the repository root.
+2. Open the `Reader` screen in the desktop app.
+3. Select `Open .txt file` and choose a plain text file.
+4. Press `Play` and confirm the text is spoken aloud.
+5. Press `Pause` and confirm speech pauses.
+6. Press `Play` again and confirm playback resumes.
+7. Press `Stop` and confirm speech is canceled.
+8. Change the reading speed slider, press `Stop`, then press `Play` again and confirm the new rate is used.
+9. With no file loaded, press `Play` and confirm the app shows a clear message.
+
 ## Next steps
 - Add local text extraction pipeline
-- Add text-to-speech playback
 - Add persistence for reading state
