@@ -87,6 +87,18 @@ type ReaderDocumentState = {
 
 type PlaybackState = "idle" | "playing" | "paused";
 
+function splitIntoParagraphs(text: string | null) {
+  if (!text) {
+    return [];
+  }
+
+  return text
+    .replace(/\r\n/g, "\n")
+    .split(/\n\s*\n+/)
+    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, " ").trim())
+    .filter(Boolean);
+}
+
 function isInteractiveElement(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -113,6 +125,10 @@ function ReaderScreen() {
     "Load a .txt or text-based .pdf file to start playback."
   );
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const paragraphRefs = useRef<Array<HTMLParagraphElement | null>>([]);
+
+  const paragraphs = splitIntoParagraphs(documentState.text);
+  const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0);
 
   useEffect(() => {
     return () => {
@@ -139,6 +155,31 @@ function ReaderScreen() {
         : "Load a .txt or text-based .pdf file to start playback."
     );
   }, [documentState.text]);
+
+  useEffect(() => {
+    setCurrentParagraphIndex(0);
+  }, [documentState.text]);
+
+  useEffect(() => {
+    if (paragraphs.length === 0) {
+      if (currentParagraphIndex !== 0) {
+        setCurrentParagraphIndex(0);
+      }
+      return;
+    }
+
+    if (currentParagraphIndex > paragraphs.length - 1) {
+      setCurrentParagraphIndex(paragraphs.length - 1);
+    }
+  }, [currentParagraphIndex, paragraphs.length]);
+
+  useEffect(() => {
+    const currentParagraph = paragraphRefs.current[currentParagraphIndex];
+
+    currentParagraph?.scrollIntoView({
+      block: "nearest"
+    });
+  }, [currentParagraphIndex]);
 
   async function handleOpenFile() {
     setDocumentState((current) => ({
@@ -184,10 +225,8 @@ function ReaderScreen() {
     }
   }
 
-  function handlePlay() {
-    const textToRead = documentState.text?.trim();
-
-    if (!textToRead) {
+  function speakText(textToRead: string, startMessage: string) {
+    if (!textToRead.trim()) {
       setPlaybackState("idle");
       setPlaybackMessage("Load a .txt or text-based .pdf file before starting playback.");
       return;
@@ -212,7 +251,7 @@ function ReaderScreen() {
     utterance.rate = playbackRate;
     utterance.onstart = () => {
       setPlaybackState("playing");
-      setPlaybackMessage("Playback started.");
+      setPlaybackMessage(startMessage);
     };
     utterance.onend = () => {
       if (utteranceRef.current !== utterance) {
@@ -235,6 +274,35 @@ function ReaderScreen() {
 
     utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
+  }
+
+  function handlePlay() {
+    const textToRead = documentState.text?.trim();
+
+    if (!textToRead) {
+      setPlaybackState("idle");
+      setPlaybackMessage("Load a .txt or text-based .pdf file before starting playback.");
+      return;
+    }
+
+    speakText(textToRead, "Playback started.");
+  }
+
+  function handleReadFromCurrentParagraph() {
+    const currentParagraph = paragraphs[currentParagraphIndex];
+
+    if (!currentParagraph) {
+      setPlaybackState("idle");
+      setPlaybackMessage("Load a document with readable paragraphs before starting playback.");
+      return;
+    }
+
+    const textToRead = paragraphs.slice(currentParagraphIndex).join("\n\n");
+
+    speakText(
+      textToRead,
+      `Playback started from paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}.`
+    );
   }
 
   function handlePause() {
@@ -286,6 +354,26 @@ function ReaderScreen() {
       if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
         handleStop();
+        return;
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        setCurrentParagraphIndex((currentIndex) =>
+          paragraphs.length === 0 ? 0 : Math.min(currentIndex + 1, paragraphs.length - 1)
+        );
+        return;
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCurrentParagraphIndex((currentIndex) => Math.max(currentIndex - 1, 0));
+        return;
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        handleReadFromCurrentParagraph();
       }
     }
 
@@ -294,13 +382,13 @@ function ReaderScreen() {
     return () => {
       window.removeEventListener("keydown", handleReaderKeydown);
     };
-  }, [playbackState, playbackRate, documentState.text]);
+  }, [paragraphs.length, playbackState, playbackRate, documentState.text, currentParagraphIndex]);
 
   const statusMessage = documentState.error
     ? documentState.error
     : documentState.filePath
-      ? `Loaded ${documentState.fileType === "pdf" ? "PDF" : "text"} file: ${documentState.filePath}`
-      : "No document loaded yet.";
+      ? `Loaded ${documentState.fileType === "pdf" ? "PDF" : "text"} file: ${documentState.filePath}. Paragraph ${Math.min(currentParagraphIndex + 1, Math.max(paragraphs.length, 1))} of ${paragraphs.length || 0}.`
+      : "No document loaded. Paragraph 0 of 0.";
 
   const hasText = Boolean(documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
@@ -339,11 +427,25 @@ function ReaderScreen() {
 
       <SectionCard
         title="Document text"
-        description="The extracted text from the selected document appears here."
+        description="The extracted text from the selected document appears here, split into readable paragraphs."
       >
         <div className="reader-panel" tabIndex={0} aria-label="Document text area">
-          {documentState.text ? (
-            <pre className="reader-text">{documentState.text}</pre>
+          {paragraphs.length > 0 ? (
+            <div className="reader-text" role="list" aria-label="Document paragraphs">
+              {paragraphs.map((paragraph, index) => (
+                <p
+                  key={`${index}-${paragraph.slice(0, 32)}`}
+                  ref={(element) => {
+                    paragraphRefs.current[index] = element;
+                  }}
+                  className={index === currentParagraphIndex ? "reader-paragraph current-paragraph" : "reader-paragraph"}
+                  role="listitem"
+                  aria-current={index === currentParagraphIndex ? "true" : undefined}
+                >
+                  {paragraph}
+                </p>
+              ))}
+            </div>
           ) : (
             <p className="empty-state">
               No file is loaded. Use the &quot;Open .txt or .pdf file&quot; button to choose a readable document.
@@ -357,7 +459,10 @@ function ReaderScreen() {
         description="Use local device speech to read the loaded text aloud."
       >
         <div className="controls" role="group" aria-label="Playback controls">
-          <p className="hint">Shortcuts: Ctrl+O opens a document, Space plays or pauses, and S stops playback.</p>
+          <p className="hint">
+            Shortcuts: Ctrl+O opens a document, Space plays or pauses, S stops playback, J and K move between
+            paragraphs, and R reads from the current paragraph.
+          </p>
           <button type="button" onClick={handlePlay} aria-describedby="playback-status">
             {playbackState === "paused" ? "Resume" : "Play"}
           </button>
@@ -398,6 +503,11 @@ function ReaderScreen() {
             aria-atomic="true"
           >
             <strong>Playback status:</strong> {playbackStatusLabel}. {playbackMessage}
+          </p>
+          <p className="status-message" role="status" aria-live="polite" aria-atomic="true">
+            {paragraphs.length > 0
+              ? `Current paragraph: ${currentParagraphIndex + 1} of ${paragraphs.length}.`
+              : "Current paragraph: no document loaded."}
           </p>
         </div>
       </SectionCard>

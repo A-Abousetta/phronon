@@ -199,9 +199,24 @@ select:disabled {
 
 .reader-text {
   margin: 0;
+  font: inherit;
+}
+
+.reader-paragraph {
+  margin: 0;
+  padding: 0.75rem;
+  border-radius: 0.65rem;
   white-space: pre-wrap;
   word-break: break-word;
-  font: inherit;
+}
+
+.reader-paragraph + .reader-paragraph {
+  margin-top: 0.75rem;
+}
+
+.current-paragraph {
+  background: #e6f1fb;
+  border-inline-start: 0.35rem solid var(--primary);
 }
 
 .status-message,

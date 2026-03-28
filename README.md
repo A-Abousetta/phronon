@@ -83,8 +83,10 @@ PDF support is intentionally limited for this first step:
 ## Reader text-to-speech playback
 The Reader screen now supports local text-to-speech playback for the currently loaded `.txt` or extracted `.pdf` content using the built-in speech synthesis available in the Electron renderer. `Play` starts or resumes reading, `Pause` pauses the current speech, `Stop` cancels it, and the reading speed slider adjusts the playback rate for new speech. If no text is loaded, the app announces a clear status message instead of failing silently.
 
+When a document is loaded, Phronon also splits the extracted text into readable paragraphs by looking for blank lines between text blocks. The Reader tracks a current paragraph, shows its position, highlights it in the document view, and can start speech from that paragraph onward.
+
 ## Reader keyboard shortcuts
-The Reader screen also supports keyboard-first controls for core actions. `Ctrl+O` opens the document picker, `Space` toggles play and pause while the Reader is active, and `S` stops playback. These shortcuts intentionally stay inactive while a form control such as the reading speed slider or a button has focus so normal keyboard behavior is preserved.
+The Reader screen also supports keyboard-first controls for core actions. `Ctrl+O` opens the document picker, `Space` toggles play and pause while the Reader is active, `S` stops playback, `J` moves to the next paragraph, `K` moves to the previous paragraph, and `R` starts reading from the current paragraph. These shortcuts intentionally stay inactive while a form control such as the reading speed slider or a button has focus so normal keyboard behavior is preserved.
 
 ## Manual test steps
 1. Run `npm run dev` from the repository root.
@@ -101,10 +103,14 @@ The Reader screen also supports keyboard-first controls for core actions. `Ctrl+
 12. Press `S` while speech is playing or paused and confirm playback stops without overlapping speech.
 13. Open a text-based `.pdf` file and confirm extracted text appears in the same reader area.
 14. Press `Play` and confirm the extracted PDF text is read aloud.
-15. Open a scanned PDF or an image-only PDF and confirm Phronon shows a clear message that OCR/scanned PDF support is not implemented yet.
-16. Move focus to the reading speed slider and press `Space` or `S`; confirm the shortcut does not fire and the focused control keeps its normal behavior.
-17. Change the reading speed slider, press `Stop`, then press `Play` again and confirm the new rate is used.
-18. With no file loaded, press `Play` or `Space` and confirm the app shows a clear status message.
+15. Confirm the Reader status announces the current paragraph position, such as `Paragraph 1 of Y`.
+16. Press `J` and confirm the current paragraph moves forward and the highlighted paragraph updates.
+17. Press `K` and confirm the current paragraph moves backward and the highlighted paragraph updates.
+18. Press `R` and confirm speech starts from the highlighted paragraph instead of the top of the document.
+19. Open a scanned PDF or an image-only PDF and confirm Phronon shows a clear message that OCR/scanned PDF support is not implemented yet.
+20. Move focus to the reading speed slider and press `Space`, `S`, `J`, `K`, or `R`; confirm the shortcut does not fire and the focused control keeps its normal behavior.
+21. Change the reading speed slider, press `Stop`, then press `Play` again and confirm the new rate is used.
+22. With no file loaded, press `Play`, `Space`, or `R` and confirm the app shows a clear status message.
 
 ## Next steps
 - Add local text extraction pipeline
