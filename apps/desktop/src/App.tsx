@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
+import { getReaderShortcutAction, isInteractiveElement, splitIntoParagraphs } from "./readerControls";
+
 type ScreenId = "home" | "reader" | "settings";
 
 type Screen = {
@@ -87,29 +89,10 @@ type ReaderDocumentState = {
 
 type PlaybackState = "idle" | "playing" | "paused";
 
-function splitIntoParagraphs(text: string | null) {
-  if (!text) {
-    return [];
-  }
-
-  return text
-    .replace(/\r\n/g, "\n")
-    .split(/\n\s*\n+/)
-    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, " ").trim())
-    .filter(Boolean);
-}
-
-function isInteractiveElement(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-
-  return Boolean(
-    target.closest(
-      'input, textarea, select, button, [contenteditable="true"], [role="textbox"], [role="slider"]'
-    )
-  );
-}
+type PlaybackRange = {
+  startIndex: number;
+  endIndex: number;
+};
 
 function ReaderScreen() {
   const [documentState, setDocumentState] = useState<ReaderDocumentState>({
@@ -126,12 +109,137 @@ function ReaderScreen() {
   );
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const paragraphRefs = useRef<Array<HTMLParagraphElement | null>>([]);
+  const readerPanelRef = useRef<HTMLDivElement | null>(null);
+  const playbackRangeRef = useRef<PlaybackRange | null>(null);
+  const playbackSessionRef = useRef(0);
+  const playbackStateRef = useRef<PlaybackState>("idle");
+  const playbackRateRef = useRef(1);
+  const restartPausedParagraphRef = useRef(false);
+
+  function clampPlaybackRate(value: number) {
+    return Math.min(2, Math.max(0.5, Math.round(value * 10) / 10));
+  }
 
   const paragraphs = splitIntoParagraphs(documentState.text);
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0);
 
   useEffect(() => {
+    playbackStateRef.current = playbackState;
+  }, [playbackState]);
+
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+  }, [playbackRate]);
+
+  function stopPlayback(message: string, nextState: PlaybackState = "idle") {
+    playbackSessionRef.current += 1;
+    playbackRangeRef.current = null;
+    utteranceRef.current = null;
+    restartPausedParagraphRef.current = false;
+
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    setPlaybackState(nextState);
+    setPlaybackMessage(message);
+  }
+
+  function playParagraphChunk(paragraphIndex: number, sessionId: number, startMessage: string) {
+    if (!("speechSynthesis" in window)) {
+      stopPlayback("Speech playback is not available in this version of the app.");
+      return;
+    }
+
+    const playbackRange = playbackRangeRef.current;
+
+    if (!playbackRange || sessionId !== playbackSessionRef.current) {
+      return;
+    }
+
+    const paragraph = paragraphs[paragraphIndex];
+
+    if (!paragraph) {
+      stopPlayback("Playback finished.");
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(paragraph);
+    utterance.rate = playbackRateRef.current;
+    utterance.onstart = () => {
+      if (sessionId !== playbackSessionRef.current) {
+        return;
+      }
+
+      utteranceRef.current = utterance;
+      setCurrentParagraphIndex(paragraphIndex);
+      setPlaybackState("playing");
+      setPlaybackMessage(
+        paragraphIndex === playbackRange.startIndex
+          ? startMessage
+          : `Reading paragraph ${paragraphIndex + 1} of ${paragraphs.length}.`
+      );
+    };
+    utterance.onend = () => {
+      if (sessionId !== playbackSessionRef.current || utteranceRef.current !== utterance) {
+        return;
+      }
+
+      utteranceRef.current = null;
+
+      if (paragraphIndex >= playbackRange.endIndex) {
+        stopPlayback("Playback finished.");
+        return;
+      }
+
+      playParagraphChunk(paragraphIndex + 1, sessionId, startMessage);
+    };
+    utterance.onerror = () => {
+      if (sessionId !== playbackSessionRef.current || utteranceRef.current !== utterance) {
+        return;
+      }
+
+      stopPlayback("Phronon could not play the current text.");
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function startChunkedPlayback(startIndex: number, endIndex: number, startMessage: string) {
+    if (paragraphs.length === 0) {
+      setPlaybackState("idle");
+      setPlaybackMessage("Load a document with readable paragraphs before starting playback.");
+      return;
+    }
+
+    if (!("speechSynthesis" in window)) {
+      setPlaybackState("idle");
+      setPlaybackMessage("Speech playback is not available in this version of the app.");
+      return;
+    }
+
+    const safeStartIndex = Math.min(Math.max(startIndex, 0), paragraphs.length - 1);
+    const safeEndIndex = Math.min(Math.max(endIndex, safeStartIndex), paragraphs.length - 1);
+    const sessionId = playbackSessionRef.current + 1;
+
+    playbackSessionRef.current = sessionId;
+    playbackRangeRef.current = {
+      startIndex: safeStartIndex,
+      endIndex: safeEndIndex
+    };
+    restartPausedParagraphRef.current = false;
+    utteranceRef.current = null;
+    window.speechSynthesis.cancel();
+    playParagraphChunk(safeStartIndex, sessionId, startMessage);
+  }
+
+  useEffect(() => {
     return () => {
+      playbackSessionRef.current += 1;
+      playbackRangeRef.current = null;
+      utteranceRef.current = null;
+      restartPausedParagraphRef.current = false;
+
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
@@ -141,13 +249,18 @@ function ReaderScreen() {
   useEffect(() => {
     if (!("speechSynthesis" in window)) {
       utteranceRef.current = null;
+      playbackRangeRef.current = null;
+      restartPausedParagraphRef.current = false;
       setPlaybackState("idle");
       setPlaybackMessage("Speech playback is not available in this version of the app.");
       return;
     }
 
-    window.speechSynthesis.cancel();
+    playbackSessionRef.current += 1;
+    playbackRangeRef.current = null;
     utteranceRef.current = null;
+    restartPausedParagraphRef.current = false;
+    window.speechSynthesis.cancel();
     setPlaybackState("idle");
     setPlaybackMessage(
       documentState.text
@@ -180,6 +293,10 @@ function ReaderScreen() {
       block: "nearest"
     });
   }, [currentParagraphIndex]);
+
+  useEffect(() => {
+    readerPanelRef.current?.focus();
+  }, []);
 
   async function handleOpenFile() {
     setDocumentState((current) => ({
@@ -225,83 +342,53 @@ function ReaderScreen() {
     }
   }
 
-  function speakText(textToRead: string, startMessage: string) {
-    if (!textToRead.trim()) {
+  function handlePlay() {
+    if (!documentState.text?.trim()) {
       setPlaybackState("idle");
       setPlaybackMessage("Load a .txt or text-based .pdf file before starting playback.");
       return;
     }
 
-    if (!("speechSynthesis" in window)) {
-      setPlaybackState("idle");
-      setPlaybackMessage("Speech playback is not available in this version of the app.");
+    if (
+      playbackStateRef.current === "paused" &&
+      restartPausedParagraphRef.current &&
+      playbackRangeRef.current
+    ) {
+      startChunkedPlayback(
+        currentParagraphIndex,
+        playbackRangeRef.current.endIndex,
+        `Playback resumed from paragraph ${currentParagraphIndex + 1} of ${paragraphs.length} at ${playbackRateRef.current.toFixed(1)}x.`
+      );
       return;
     }
 
-    if (window.speechSynthesis.paused && window.speechSynthesis.speaking) {
+    if ("speechSynthesis" in window && window.speechSynthesis.paused && window.speechSynthesis.speaking) {
       window.speechSynthesis.resume();
       setPlaybackState("playing");
       setPlaybackMessage("Playback resumed.");
       return;
     }
 
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(textToRead);
-    utterance.rate = playbackRate;
-    utterance.onstart = () => {
-      setPlaybackState("playing");
-      setPlaybackMessage(startMessage);
-    };
-    utterance.onend = () => {
-      if (utteranceRef.current !== utterance) {
-        return;
-      }
-
-      utteranceRef.current = null;
-      setPlaybackState("idle");
-      setPlaybackMessage("Playback finished.");
-    };
-    utterance.onerror = () => {
-      if (utteranceRef.current !== utterance) {
-        return;
-      }
-
-      utteranceRef.current = null;
-      setPlaybackState("idle");
-      setPlaybackMessage("Phronon could not play the current text.");
-    };
-
-    utteranceRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
+    startChunkedPlayback(
+      currentParagraphIndex,
+      paragraphs.length - 1,
+      `Playback started from paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}.`
+    );
   }
 
-  function handlePlay() {
-    const textToRead = documentState.text?.trim();
-
-    if (!textToRead) {
-      setPlaybackState("idle");
-      setPlaybackMessage("Load a .txt or text-based .pdf file before starting playback.");
-      return;
-    }
-
-    speakText(textToRead, "Playback started.");
-  }
-
-  function handleReadFromCurrentParagraph() {
+  function handleRepeatCurrentParagraph() {
     const currentParagraph = paragraphs[currentParagraphIndex];
 
     if (!currentParagraph) {
       setPlaybackState("idle");
-      setPlaybackMessage("Load a document with readable paragraphs before starting playback.");
+      setPlaybackMessage("Load a document with readable paragraphs before repeating a paragraph.");
       return;
     }
 
-    const textToRead = paragraphs.slice(currentParagraphIndex).join("\n\n");
-
-    speakText(
-      textToRead,
-      `Playback started from paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}.`
+    startChunkedPlayback(
+      currentParagraphIndex,
+      currentParagraphIndex,
+      `Repeating paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}.`
     );
   }
 
@@ -322,10 +409,44 @@ function ReaderScreen() {
       return;
     }
 
-    window.speechSynthesis.cancel();
-    utteranceRef.current = null;
-    setPlaybackState("idle");
-    setPlaybackMessage("Playback stopped.");
+    stopPlayback("Playback stopped.");
+  }
+
+  function handlePlaybackRateChange(nextRate: number) {
+    const safeNextRate = clampPlaybackRate(nextRate);
+
+    setPlaybackRate(safeNextRate);
+
+    if (!("speechSynthesis" in window)) {
+      return;
+    }
+
+    playbackRateRef.current = safeNextRate;
+
+    if (playbackStateRef.current === "playing" && playbackRangeRef.current) {
+      setPlaybackMessage(
+        `Reading speed set to ${safeNextRate.toFixed(1)}x. It will apply on the next paragraph.`
+      );
+      return;
+    }
+
+    if (playbackStateRef.current === "paused" && playbackRangeRef.current) {
+      restartPausedParagraphRef.current = true;
+      playbackSessionRef.current += 1;
+      utteranceRef.current = null;
+      window.speechSynthesis.cancel();
+      setPlaybackState("paused");
+      setPlaybackMessage(
+        `Reading speed set to ${safeNextRate.toFixed(1)}x. Press Play to continue from paragraph ${currentParagraphIndex + 1} at the new speed.`
+      );
+      return;
+    }
+
+    setPlaybackMessage(`Reading speed set to ${safeNextRate.toFixed(1)}x.`);
+  }
+
+  function changePlaybackRate(step: number) {
+    handlePlaybackRateChange(clampPlaybackRate(playbackRateRef.current + step));
   }
 
   useEffect(() => {
@@ -334,46 +455,45 @@ function ReaderScreen() {
         return;
       }
 
-      if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        void handleOpenFile();
+      const action = getReaderShortcutAction(event);
+
+      if (!action) {
         return;
       }
 
-      if (event.key === " " || event.code === "Space") {
-        event.preventDefault();
+      event.preventDefault();
 
-        if (playbackState === "playing") {
-          handlePause();
-        } else {
-          handlePlay();
-        }
-        return;
-      }
-
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        handleStop();
-        return;
-      }
-
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "j") {
-        event.preventDefault();
-        setCurrentParagraphIndex((currentIndex) =>
-          paragraphs.length === 0 ? 0 : Math.min(currentIndex + 1, paragraphs.length - 1)
-        );
-        return;
-      }
-
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCurrentParagraphIndex((currentIndex) => Math.max(currentIndex - 1, 0));
-        return;
-      }
-
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "r") {
-        event.preventDefault();
-        handleReadFromCurrentParagraph();
+      switch (action) {
+        case "open":
+          void handleOpenFile();
+          return;
+        case "togglePlayPause":
+          if (playbackStateRef.current === "playing") {
+            handlePause();
+          } else {
+            handlePlay();
+          }
+          return;
+        case "stop":
+          handleStop();
+          return;
+        case "nextParagraph":
+          setCurrentParagraphIndex((currentIndex) =>
+            paragraphs.length === 0 ? 0 : Math.min(currentIndex + 1, paragraphs.length - 1)
+          );
+          return;
+        case "previousParagraph":
+          setCurrentParagraphIndex((currentIndex) => Math.max(currentIndex - 1, 0));
+          return;
+        case "repeatCurrentParagraph":
+          handleRepeatCurrentParagraph();
+          return;
+        case "increaseSpeed":
+          changePlaybackRate(0.1);
+          return;
+        case "decreaseSpeed":
+          changePlaybackRate(-0.1);
+          return;
       }
     }
 
@@ -382,7 +502,7 @@ function ReaderScreen() {
     return () => {
       window.removeEventListener("keydown", handleReaderKeydown);
     };
-  }, [paragraphs.length, playbackState, playbackRate, documentState.text, currentParagraphIndex]);
+  }, [paragraphs.length, documentState.text, currentParagraphIndex]);
 
   const statusMessage = documentState.error
     ? documentState.error
@@ -429,7 +549,7 @@ function ReaderScreen() {
         title="Document text"
         description="The extracted text from the selected document appears here, split into readable paragraphs."
       >
-        <div className="reader-panel" tabIndex={0} aria-label="Document text area">
+        <div ref={readerPanelRef} className="reader-panel" tabIndex={-1} aria-label="Document text area">
           {paragraphs.length > 0 ? (
             <div className="reader-text" role="list" aria-label="Document paragraphs">
               {paragraphs.map((paragraph, index) => (
@@ -460,8 +580,9 @@ function ReaderScreen() {
       >
         <div className="controls" role="group" aria-label="Playback controls">
           <p className="hint">
-            Shortcuts: Ctrl+O opens a document, Space plays or pauses, S stops playback, J and K move between
-            paragraphs, and R reads from the current paragraph.
+            Shortcuts: Ctrl+O opens a document, Space plays, pauses, or resumes from the current paragraph, S stops
+            playback, J and K move between paragraphs, R repeats the current paragraph, and Alt+Up or Alt+Down adjust
+            speed.
           </p>
           <button type="button" onClick={handlePlay} aria-describedby="playback-status">
             {playbackState === "paused" ? "Resume" : "Play"}
@@ -488,7 +609,7 @@ function ReaderScreen() {
               max="2"
               step="0.1"
               value={playbackRate}
-              onChange={(event) => setPlaybackRate(Number(event.target.value))}
+              onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
               aria-describedby={speedValueId}
             />
             <span id={speedValueId} className="hint">

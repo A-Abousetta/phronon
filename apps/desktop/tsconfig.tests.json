@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./test-dist",
+    "rootDir": "./src",
+    "types": ["node"]
+  },
+  "include": ["src/readerControls.ts", "src/readerControls.test.ts"]
+}

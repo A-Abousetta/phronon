@@ -9,7 +9,8 @@
     "electron:dev": "tsc -p tsconfig.electron.json && electron dist-electron/main.js",
     "build": "tsc -p tsconfig.electron.json && vite build",
     "start": "electron dist-electron/main.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
+    "test": "tsc -p tsconfig.tests.json && node test-dist/readerControls.test.js"
   },
   "dependencies": {
     "react": "^19.1.1",
