@@ -236,6 +236,44 @@ async function extractPdfText(filePath: string): Promise<PdfExtractionResult> {
   };
 }
 
+async function openDocumentFromPath(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+
+  try {
+    if (extension === ".pdf") {
+      const pdfResult = await extractPdfText(filePath);
+
+      if (!pdfResult.ok) {
+        return {
+          canceled: false,
+          error: pdfResult.error
+        };
+      }
+
+      return {
+        canceled: false,
+        filePath,
+        fileType: "pdf" as const,
+        text: pdfResult.text
+      };
+    }
+
+    const text = await readFile(filePath, "utf8");
+
+    return {
+      canceled: false,
+      filePath,
+      fileType: "txt" as const,
+      text
+    };
+  } catch {
+    return {
+      canceled: false,
+      error: "Phronon could not read that document. Please choose a readable .txt or text-based .pdf file and try again."
+    };
+  }
+}
+
 ipcMain.handle("reader:open-document", async () => {
   const window = BrowserWindow.getFocusedWindow();
   const result = window
@@ -283,42 +321,10 @@ ipcMain.handle("reader:open-document", async () => {
   }
 
   const [filePath] = result.filePaths;
-  const extension = path.extname(filePath).toLowerCase();
-
-  try {
-    if (extension === ".pdf") {
-      const pdfResult = await extractPdfText(filePath);
-
-      if (!pdfResult.ok) {
-        return {
-          canceled: false,
-          error: pdfResult.error
-        };
-      }
-
-      return {
-        canceled: false,
-        filePath,
-        fileType: "pdf" as const,
-        text: pdfResult.text
-      };
-    }
-
-    const text = await readFile(filePath, "utf8");
-
-    return {
-      canceled: false,
-      filePath,
-      fileType: "txt" as const,
-      text
-    };
-  } catch {
-    return {
-      canceled: false,
-      error: "Phronon could not read that document. Please choose a readable .txt or text-based .pdf file and try again."
-    };
-  }
+  return openDocumentFromPath(filePath);
 });
+
+ipcMain.handle("reader:open-document-at-path", async (_event, filePath: string) => openDocumentFromPath(filePath));
 
 app.whenReady().then(() => {
   createWindow();

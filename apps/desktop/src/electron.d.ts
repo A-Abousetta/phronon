@@ -19,6 +19,7 @@ type OpenReaderDocumentResult =
 type PhrononApi = {
   appName: string;
   openReaderDocument: () => Promise<OpenReaderDocumentResult>;
+  openDocumentAtPath: (filePath: string) => Promise<OpenReaderDocumentResult>;
 };
 
 declare global {

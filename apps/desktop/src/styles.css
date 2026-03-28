@@ -228,10 +228,29 @@ select:disabled {
 }
 
 .simple-list li {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.recent-document-button {
+  display: grid;
+  width: 100%;
+  gap: 0.2rem;
   padding: 0.8rem 0.9rem;
+  text-align: left;
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   background: var(--surface-muted);
+}
+
+.recent-document-name {
+  font-weight: 600;
+}
+
+.recent-document-meta {
+  color: var(--text-muted);
+  font-size: 0.92rem;
 }
 
 .screen-grid {
