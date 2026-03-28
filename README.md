@@ -16,12 +16,11 @@ Help students access and understand study material independently through a keybo
 ## Project structure
 
 Phronon/
-├─ apps/
-│ └─ desktop/ Electron + React desktop app
-├─ backend/ Python backend scaffold
-├─ docs/ Vision and roadmap
-├─ scripts/ Local development helpers
-```
+- apps/
+  - desktop/    Electron + React desktop app
+- backend/      Python backend scaffold
+- docs/         Vision and roadmap
+- scripts/      Local development helpers
 
 ## Accessibility principles
 - Keyboard-first navigation
