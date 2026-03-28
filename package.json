@@ -1,0 +1,16 @@
+{
+  "name": "phronon",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Accessibility-first study assistant for blind and low-vision students.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev-desktop.mjs",
+    "build": "npm --workspace apps/desktop run build",
+    "start": "npm --workspace apps/desktop run start",
+    "typecheck": "npm --workspace apps/desktop run typecheck",
+    "backend": "python -m phronon_backend"
+  }
+}

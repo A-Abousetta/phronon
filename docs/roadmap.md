@@ -3,9 +3,13 @@
 ## v0.1 - Foundation
 - Project scaffold
 - Desktop app shell
+- Electron window
+- React navigation for Home, Reader, and Settings
+- Accessible placeholder UI for import, reading, and playback
+- Python backend scaffold
 - Reader screen
 - Settings screen
-- Basic file import
+- README and core docs
 
 ## v0.2 - Reading pipeline
 - TXT import
@@ -31,6 +35,4 @@
 - Quiz questions
 
 ## Later
-- Telegram companion bot
-- Website
-- Limited online demo
+- Optional companion experiences if needed
