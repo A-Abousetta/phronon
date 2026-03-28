@@ -1,24 +1,26 @@
+<p align="center">
+  <img src="./assets/phronon-readme-header.png" alt="Phronon header" width="100%" />
+</p>
+
 # Phronon
 
-Phronon is an accessibility-first open-source study assistant for blind and low-vision students.
+Phronon is an open-source desktop application designed to help blind and low-vision students read, listen to, and navigate study materials independently.
 
-This repository now includes the initial scaffold for:
-- An Electron desktop app
-- A React interface with Home, Reader, and Settings screens
-- A local Python backend placeholder
-- Project docs for vision and roadmap
+## What is Phronon?
+
+Phronon is an accessibility-first desktop application designed to help blind and low-vision students read, listen to, and navigate study materials independently.
 
 ## Mission
-Help students import study material, extract readable text, and listen to it independently through a keyboard-first and screen-reader-friendly desktop app.
+Help students access and understand study material independently through a keyboard-first, screen-reader-friendly desktop application.
 
-## Current structure
-```text
+## Project structure
+
 Phronon/
-  apps/
-    desktop/   Electron + React desktop app
-  backend/     Python backend scaffold
-  docs/        Vision and roadmap
-  scripts/     Small helper scripts for local development
+├─ apps/
+│ └─ desktop/ Electron + React desktop app
+├─ backend/ Python backend scaffold
+├─ docs/ Vision and roadmap
+├─ scripts/ Local development helpers
 ```
 
 ## Accessibility principles
@@ -64,7 +66,7 @@ From the repository root:
 npm run build
 ```
 
-## Version 0.1 scope
+## Current scope (v0.1)
 - Project scaffold
 - Basic Electron window
 - React UI for Home, Reader, and Settings
