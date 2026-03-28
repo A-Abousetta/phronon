@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 type ScreenId = "home" | "reader" | "settings";
 
@@ -84,6 +84,8 @@ type ReaderDocumentState = {
   isLoading: boolean;
 };
 
+type PlaybackState = "idle" | "playing" | "paused";
+
 function ReaderScreen() {
   const [documentState, setDocumentState] = useState<ReaderDocumentState>({
     filePath: null,
@@ -91,6 +93,36 @@ function ReaderScreen() {
     error: null,
     isLoading: false
   });
+  const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [playbackMessage, setPlaybackMessage] = useState("Load a text file to start playback.");
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) {
+      utteranceRef.current = null;
+      setPlaybackState("idle");
+      setPlaybackMessage("Speech playback is not available in this version of the app.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    utteranceRef.current = null;
+    setPlaybackState("idle");
+    setPlaybackMessage(
+      documentState.text
+        ? "Text is ready to play."
+        : "Load a text file to start playback."
+    );
+  }, [documentState.text]);
 
   async function handleOpenFile() {
     setDocumentState((current) => ({
@@ -135,11 +167,91 @@ function ReaderScreen() {
     }
   }
 
+  function handlePlay() {
+    const textToRead = documentState.text?.trim();
+
+    if (!textToRead) {
+      setPlaybackState("idle");
+      setPlaybackMessage("Load a text file before starting playback.");
+      return;
+    }
+
+    if (!("speechSynthesis" in window)) {
+      setPlaybackState("idle");
+      setPlaybackMessage("Speech playback is not available in this version of the app.");
+      return;
+    }
+
+    if (window.speechSynthesis.paused && window.speechSynthesis.speaking) {
+      window.speechSynthesis.resume();
+      setPlaybackState("playing");
+      setPlaybackMessage("Playback resumed.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(textToRead);
+    utterance.rate = playbackRate;
+    utterance.onstart = () => {
+      setPlaybackState("playing");
+      setPlaybackMessage("Playback started.");
+    };
+    utterance.onend = () => {
+      if (utteranceRef.current !== utterance) {
+        return;
+      }
+
+      utteranceRef.current = null;
+      setPlaybackState("idle");
+      setPlaybackMessage("Playback finished.");
+    };
+    utterance.onerror = () => {
+      if (utteranceRef.current !== utterance) {
+        return;
+      }
+
+      utteranceRef.current = null;
+      setPlaybackState("idle");
+      setPlaybackMessage("Phronon could not play the current text.");
+    };
+
+    utteranceRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function handlePause() {
+    if (!("speechSynthesis" in window) || !window.speechSynthesis.speaking || window.speechSynthesis.paused) {
+      return;
+    }
+
+    window.speechSynthesis.pause();
+    setPlaybackState("paused");
+    setPlaybackMessage("Playback paused.");
+  }
+
+  function handleStop() {
+    if (!("speechSynthesis" in window)) {
+      setPlaybackState("idle");
+      setPlaybackMessage("Speech playback is not available in this version of the app.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    utteranceRef.current = null;
+    setPlaybackState("idle");
+    setPlaybackMessage("Playback stopped.");
+  }
+
   const statusMessage = documentState.error
     ? documentState.error
     : documentState.filePath
       ? `Loaded file: ${documentState.filePath}`
       : "No text file loaded yet.";
+
+  const hasText = Boolean(documentState.text?.trim());
+  const speechSynthesisAvailable = "speechSynthesis" in window;
+  const speedValueId = useId();
 
   return (
     <div className="screen-grid">
@@ -179,16 +291,48 @@ function ReaderScreen() {
 
       <SectionCard
         title="Playback controls"
-        description="Placeholder controls for text-to-speech playback."
+        description="Use local device speech to read the loaded text aloud."
       >
         <div className="controls" role="group" aria-label="Playback controls">
-          <button type="button">Play</button>
-          <button type="button">Pause</button>
-          <button type="button">Stop</button>
+          <button type="button" onClick={handlePlay} aria-describedby="playback-status">
+            {playbackState === "paused" ? "Resume" : "Play"}
+          </button>
+          <button
+            type="button"
+            onClick={handlePause}
+            disabled={!speechSynthesisAvailable || playbackState !== "playing"}
+          >
+            Pause
+          </button>
+          <button
+            type="button"
+            onClick={handleStop}
+            disabled={!speechSynthesisAvailable || playbackState === "idle"}
+          >
+            Stop
+          </button>
           <label className="field">
             <span>Reading speed</span>
-            <input type="range" min="0.5" max="2" step="0.1" defaultValue="1" />
+            <input
+              type="range"
+              min="0.5"
+              max="2"
+              step="0.1"
+              value={playbackRate}
+              onChange={(event) => setPlaybackRate(Number(event.target.value))}
+              aria-describedby={speedValueId}
+            />
+            <span id={speedValueId} className="hint">
+              Current speed: {playbackRate.toFixed(1)}x
+            </span>
           </label>
+          <p
+            id="playback-status"
+            className={!hasText || !speechSynthesisAvailable ? "status-message error-text" : "status-message"}
+            aria-live="polite"
+          >
+            {playbackMessage}
+          </p>
         </div>
       </SectionCard>
     </div>
