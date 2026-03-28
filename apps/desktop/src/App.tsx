@@ -80,6 +80,7 @@ function HomeScreen() {
 type ReaderDocumentState = {
   filePath: string | null;
   text: string | null;
+  fileType: "txt" | "pdf" | null;
   error: string | null;
   isLoading: boolean;
 };
@@ -102,12 +103,15 @@ function ReaderScreen() {
   const [documentState, setDocumentState] = useState<ReaderDocumentState>({
     filePath: null,
     text: null,
+    fileType: null,
     error: null,
     isLoading: false
   });
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [playbackMessage, setPlaybackMessage] = useState("Load a text file to start playback.");
+  const [playbackMessage, setPlaybackMessage] = useState(
+    "Load a .txt or text-based .pdf file to start playback."
+  );
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   useEffect(() => {
@@ -132,7 +136,7 @@ function ReaderScreen() {
     setPlaybackMessage(
       documentState.text
         ? "Text is ready to play."
-        : "Load a text file to start playback."
+        : "Load a .txt or text-based .pdf file to start playback."
     );
   }, [documentState.text]);
 
@@ -144,7 +148,7 @@ function ReaderScreen() {
     }));
 
     try {
-      const result = await window.phronon.openTextDocument();
+      const result = await window.phronon.openReaderDocument();
 
       if (result.canceled) {
         setDocumentState((current) => ({
@@ -167,6 +171,7 @@ function ReaderScreen() {
       setDocumentState({
         filePath: result.filePath ?? null,
         text: result.text ?? null,
+        fileType: "fileType" in result ? result.fileType : null,
         error: null,
         isLoading: false
       });
@@ -184,7 +189,7 @@ function ReaderScreen() {
 
     if (!textToRead) {
       setPlaybackState("idle");
-      setPlaybackMessage("Load a text file before starting playback.");
+      setPlaybackMessage("Load a .txt or text-based .pdf file before starting playback.");
       return;
     }
 
@@ -294,8 +299,8 @@ function ReaderScreen() {
   const statusMessage = documentState.error
     ? documentState.error
     : documentState.filePath
-      ? `Loaded file: ${documentState.filePath}`
-      : "No text file loaded yet.";
+      ? `Loaded ${documentState.fileType === "pdf" ? "PDF" : "text"} file: ${documentState.filePath}`
+      : "No document loaded yet.";
 
   const hasText = Boolean(documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
@@ -314,8 +319,8 @@ function ReaderScreen() {
   return (
     <div className="screen-grid">
       <SectionCard
-        title="Open a text document"
-        description="Choose a plain text file and read it directly in the accessible reader area."
+        title="Open a document"
+        description="Choose a plain text file or a text-based PDF and read it directly in the accessible reader area."
       >
         <div className="stack">
           <button
@@ -324,7 +329,7 @@ function ReaderScreen() {
             onClick={handleOpenFile}
             disabled={documentState.isLoading}
           >
-            {documentState.isLoading ? "Opening text file..." : "Open .txt file"}
+            {documentState.isLoading ? "Opening document..." : "Open .txt or .pdf file"}
           </button>
           <p className={documentState.error ? "status-message error-text" : "status-message"} aria-live="polite">
             {statusMessage}
@@ -334,14 +339,14 @@ function ReaderScreen() {
 
       <SectionCard
         title="Document text"
-        description="The full contents of the selected .txt file appear here."
+        description="The extracted text from the selected document appears here."
       >
         <div className="reader-panel" tabIndex={0} aria-label="Document text area">
           {documentState.text ? (
             <pre className="reader-text">{documentState.text}</pre>
           ) : (
             <p className="empty-state">
-              No file is loaded. Use the &quot;Open .txt file&quot; button to choose a plain text document.
+              No file is loaded. Use the &quot;Open .txt or .pdf file&quot; button to choose a readable document.
             </p>
           )}
         </div>
@@ -352,7 +357,7 @@ function ReaderScreen() {
         description="Use local device speech to read the loaded text aloud."
       >
         <div className="controls" role="group" aria-label="Playback controls">
-          <p className="hint">Shortcuts: Ctrl+O opens a text file, Space plays or pauses, and S stops playback.</p>
+          <p className="hint">Shortcuts: Ctrl+O opens a document, Space plays or pauses, and S stops playback.</p>
           <button type="button" onClick={handlePlay} aria-describedby="playback-status">
             {playbackState === "paused" ? "Resume" : "Play"}
           </button>

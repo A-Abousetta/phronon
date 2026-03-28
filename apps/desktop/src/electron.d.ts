@@ -1,4 +1,4 @@
-type OpenTextDocumentResult =
+type OpenReaderDocumentResult =
   | {
       canceled: true;
     }
@@ -6,6 +6,7 @@ type OpenTextDocumentResult =
       canceled: false;
       filePath: string;
       text: string;
+      fileType: "txt" | "pdf";
       error?: undefined;
     }
   | {
@@ -17,7 +18,7 @@ type OpenTextDocumentResult =
 
 type PhrononApi = {
   appName: string;
-  openTextDocument: () => Promise<OpenTextDocumentResult>;
+  openReaderDocument: () => Promise<OpenReaderDocumentResult>;
 };
 
 declare global {

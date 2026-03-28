@@ -1,13 +1,19 @@
 import { spawn } from "node:child_process";
 import http from "node:http";
+import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const desktopDir = new URL("../apps/desktop/", import.meta.url);
 const desktopPath = fileURLToPath(desktopDir);
+const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const rendererUrl = "http://localhost:5173";
 const children = [];
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const projectPython =
+  process.platform === "win32"
+    ? path.join(projectRoot, ".venv", "Scripts", "python.exe")
+    : path.join(projectRoot, ".venv", "bin", "python");
 
 function spawnProcess(command, args, options = {}) {
   const child = spawn(command, args, {
@@ -73,6 +79,7 @@ try {
     cwd: desktopPath,
     env: {
       ...process.env,
+      PHRONON_PYTHON: process.env.PHRONON_PYTHON ?? projectPython,
       PHRONON_RENDERER_URL: rendererUrl
     }
   });
