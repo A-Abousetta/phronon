@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   getReaderShortcutAction,
@@ -7,12 +7,17 @@ import {
   splitParagraphIntoSpeechChunks
 } from "./readerControls";
 import {
+  clampParagraphIndex,
+  clampReadingSpeed,
   createLoadedDocumentState,
+  defaultReaderPersistenceState,
   emptyReaderDocumentState,
   getDocumentFileName,
+  readReaderPersistenceState,
   type ReaderDocumentState,
   type RecentDocument,
-  upsertRecentDocument
+  upsertRecentDocument,
+  writeReaderPersistenceState
 } from "./documentWorkflow";
 
 type ScreenId = "home" | "reader" | "settings";
@@ -45,23 +50,46 @@ const screens: Screen[] = [
   }
 ];
 
-function SectionCard(props: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  const headingId = useId();
+type PlaybackState = "idle" | "playing" | "paused";
 
-  return (
-    <section className="card" aria-labelledby={headingId}>
-      <div className="card-header">
-        <h2 id={headingId}>{props.title}</h2>
-        <p>{props.description}</p>
-      </div>
-      {props.children}
-    </section>
-  );
-}
+type PlaybackRange = {
+  startIndex: number;
+  endIndex: number;
+};
+
+type PlaybackPosition = {
+  paragraphIndex: number;
+  chunkIndex: number;
+};
+
+type OpenDocumentResult =
+  | {
+      canceled: true;
+    }
+  | {
+      canceled: false;
+      filePath: string;
+      text: string;
+      fileType: "txt" | "pdf";
+      error?: undefined;
+    }
+  | {
+      canceled: false;
+      error: string;
+      filePath?: undefined;
+      text?: undefined;
+      fileType?: undefined;
+    };
+
+type OpenDocumentSuccessResult = Extract<
+  OpenDocumentResult,
+  {
+    canceled: false;
+    filePath: string;
+    text: string;
+    fileType: "txt" | "pdf";
+  }
+>;
 
 function HomeScreen(props: {
   documentState: ReaderDocumentState;
@@ -135,47 +163,6 @@ function HomeScreen(props: {
   );
 }
 
-type PlaybackState = "idle" | "playing" | "paused";
-
-type PlaybackRange = {
-  startIndex: number;
-  endIndex: number;
-};
-
-type PlaybackPosition = {
-  paragraphIndex: number;
-  chunkIndex: number;
-};
-
-type OpenDocumentResult =
-  | {
-      canceled: true;
-    }
-  | {
-      canceled: false;
-      filePath: string;
-      text: string;
-      fileType: "txt" | "pdf";
-      error?: undefined;
-    }
-  | {
-      canceled: false;
-      error: string;
-      filePath?: undefined;
-      text?: undefined;
-      fileType?: undefined;
-    };
-
-type OpenDocumentSuccessResult = Extract<
-  OpenDocumentResult,
-  {
-    canceled: false;
-    filePath: string;
-    text: string;
-    fileType: "txt" | "pdf";
-  }
->;
-
 function isOpenDocumentSuccessResult(result: OpenDocumentResult): result is OpenDocumentSuccessResult {
   return (
     result.canceled === false &&
@@ -187,10 +174,13 @@ function isOpenDocumentSuccessResult(result: OpenDocumentResult): result is Open
 
 function ReaderScreen(props: {
   documentState: ReaderDocumentState;
+  currentParagraphIndex: number;
+  onCurrentParagraphIndexChange: (nextIndex: number) => void;
   onOpenDocument: () => Promise<void>;
+  playbackRate: number;
+  onPlaybackRateChange: (nextRate: number) => void;
 }) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
-  const [playbackRate, setPlaybackRate] = useState(1);
   const [playbackMessage, setPlaybackMessage] = useState(
     "Load a .txt or text-based .pdf file to start playback."
   );
@@ -201,23 +191,17 @@ function ReaderScreen(props: {
   const playbackPositionRef = useRef<PlaybackPosition | null>(null);
   const playbackSessionRef = useRef(0);
   const playbackStateRef = useRef<PlaybackState>("idle");
-  const playbackRateRef = useRef(1);
+  const playbackRateRef = useRef(props.playbackRate);
   const restartPausedParagraphRef = useRef(false);
-
-  function clampPlaybackRate(value: number) {
-    return Math.min(2, Math.max(0.5, Math.round(value * 10) / 10));
-  }
-
   const paragraphs = splitIntoParagraphs(props.documentState.text);
-  const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0);
 
   useEffect(() => {
     playbackStateRef.current = playbackState;
   }, [playbackState]);
 
   useEffect(() => {
-    playbackRateRef.current = playbackRate;
-  }, [playbackRate]);
+    playbackRateRef.current = props.playbackRate;
+  }, [props.playbackRate]);
 
   function stopPlayback(message: string, nextState: PlaybackState = "idle") {
     playbackSessionRef.current += 1;
@@ -278,7 +262,7 @@ function ReaderScreen(props: {
         chunkIndex
       };
       utteranceRef.current = utterance;
-      setCurrentParagraphIndex(paragraphIndex);
+      props.onCurrentParagraphIndexChange(paragraphIndex);
       setPlaybackState("playing");
       setPlaybackMessage(
         paragraphIndex === playbackRange.startIndex
@@ -397,29 +381,27 @@ function ReaderScreen(props: {
   }, [props.documentState.text]);
 
   useEffect(() => {
-    setCurrentParagraphIndex(0);
-  }, [props.documentState.text]);
-
-  useEffect(() => {
     if (paragraphs.length === 0) {
-      if (currentParagraphIndex !== 0) {
-        setCurrentParagraphIndex(0);
+      if (props.currentParagraphIndex !== 0) {
+        props.onCurrentParagraphIndexChange(0);
       }
       return;
     }
 
-    if (currentParagraphIndex > paragraphs.length - 1) {
-      setCurrentParagraphIndex(paragraphs.length - 1);
+    const safeParagraphIndex = Math.min(props.currentParagraphIndex, paragraphs.length - 1);
+
+    if (safeParagraphIndex !== props.currentParagraphIndex) {
+      props.onCurrentParagraphIndexChange(safeParagraphIndex);
     }
-  }, [currentParagraphIndex, paragraphs.length]);
+  }, [paragraphs.length, props.currentParagraphIndex, props.onCurrentParagraphIndexChange]);
 
   useEffect(() => {
-    const currentParagraph = paragraphRefs.current[currentParagraphIndex];
+    const currentParagraph = paragraphRefs.current[props.currentParagraphIndex];
 
     currentParagraph?.scrollIntoView({
       block: "nearest"
     });
-  }, [currentParagraphIndex]);
+  }, [props.currentParagraphIndex]);
 
   useEffect(() => {
     readerPanelRef.current?.focus();
@@ -442,7 +424,7 @@ function ReaderScreen(props: {
       playbackRangeRef.current
     ) {
       const pausedPosition = playbackPositionRef.current;
-      const resumeParagraphIndex = pausedPosition?.paragraphIndex ?? currentParagraphIndex;
+      const resumeParagraphIndex = pausedPosition?.paragraphIndex ?? props.currentParagraphIndex;
       const resumeChunkIndex = pausedPosition?.chunkIndex ?? 0;
 
       startChunkedPlayback(
@@ -462,14 +444,14 @@ function ReaderScreen(props: {
     }
 
     startChunkedPlayback(
-      currentParagraphIndex,
+      props.currentParagraphIndex,
       paragraphs.length - 1,
-      `Playback started from paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}.`
+      `Playback started from paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
     );
   }
 
   function handleRepeatCurrentParagraph() {
-    const currentParagraph = paragraphs[currentParagraphIndex];
+    const currentParagraph = paragraphs[props.currentParagraphIndex];
 
     if (!currentParagraph) {
       setPlaybackState("idle");
@@ -478,9 +460,9 @@ function ReaderScreen(props: {
     }
 
     startChunkedPlayback(
-      currentParagraphIndex,
-      currentParagraphIndex,
-      `Repeating paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}.`
+      props.currentParagraphIndex,
+      props.currentParagraphIndex,
+      `Repeating paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
     );
   }
 
@@ -505,9 +487,9 @@ function ReaderScreen(props: {
   }
 
   function handlePlaybackRateChange(nextRate: number) {
-    const safeNextRate = clampPlaybackRate(nextRate);
+    const safeNextRate = clampReadingSpeed(nextRate);
 
-    setPlaybackRate(safeNextRate);
+    props.onPlaybackRateChange(safeNextRate);
 
     if (!("speechSynthesis" in window)) {
       return;
@@ -529,7 +511,7 @@ function ReaderScreen(props: {
       window.speechSynthesis.cancel();
       setPlaybackState("paused");
       setPlaybackMessage(
-        `Reading speed set to ${safeNextRate.toFixed(1)}x. Press Play to continue from paragraph ${currentParagraphIndex + 1} at the new speed.`
+        `Reading speed set to ${safeNextRate.toFixed(1)}x. Press Play to continue from paragraph ${props.currentParagraphIndex + 1} at the new speed.`
       );
       return;
     }
@@ -538,7 +520,7 @@ function ReaderScreen(props: {
   }
 
   function changePlaybackRate(step: number) {
-    handlePlaybackRateChange(clampPlaybackRate(playbackRateRef.current + step));
+    handlePlaybackRateChange(playbackRateRef.current + step);
   }
 
   useEffect(() => {
@@ -570,12 +552,12 @@ function ReaderScreen(props: {
           handleStop();
           return;
         case "nextParagraph":
-          setCurrentParagraphIndex((currentIndex) =>
-            paragraphs.length === 0 ? 0 : Math.min(currentIndex + 1, paragraphs.length - 1)
+          props.onCurrentParagraphIndexChange(
+            paragraphs.length === 0 ? 0 : Math.min(props.currentParagraphIndex + 1, paragraphs.length - 1)
           );
           return;
         case "previousParagraph":
-          setCurrentParagraphIndex((currentIndex) => Math.max(currentIndex - 1, 0));
+          props.onCurrentParagraphIndexChange(Math.max(props.currentParagraphIndex - 1, 0));
           return;
         case "repeatCurrentParagraph":
           handleRepeatCurrentParagraph();
@@ -594,12 +576,12 @@ function ReaderScreen(props: {
     return () => {
       window.removeEventListener("keydown", handleReaderKeydown);
     };
-  }, [paragraphs.length, props.documentState.text, currentParagraphIndex]);
+  }, [paragraphs.length, props.currentParagraphIndex, props.onCurrentParagraphIndexChange, props.documentState.text]);
 
   const statusMessage = props.documentState.error
     ? props.documentState.error
     : props.documentState.filePath
-      ? `Loaded ${props.documentState.fileType === "pdf" ? "PDF" : "text"} file: ${props.documentState.filePath}. Paragraph ${Math.min(currentParagraphIndex + 1, Math.max(paragraphs.length, 1))} of ${paragraphs.length || 0}.`
+      ? `Loaded ${props.documentState.fileType === "pdf" ? "PDF" : "text"} file: ${props.documentState.filePath}. Paragraph ${Math.min(props.currentParagraphIndex + 1, Math.max(paragraphs.length, 1))} of ${paragraphs.length || 0}.`
       : "No document loaded. Paragraph 0 of 0.";
 
   const hasText = Boolean(props.documentState.text?.trim());
@@ -619,17 +601,17 @@ function ReaderScreen(props: {
   const fileTypeLabel = props.documentState.fileType === "pdf" ? "PDF" : props.documentState.fileType === "txt" ? "TXT" : "No file";
 
   function moveToParagraph(direction: "previous" | "next") {
-    setCurrentParagraphIndex((currentIndex) => {
-      if (paragraphs.length === 0) {
-        return 0;
-      }
+    if (paragraphs.length === 0) {
+      props.onCurrentParagraphIndexChange(0);
+      return;
+    }
 
-      if (direction === "previous") {
-        return Math.max(currentIndex - 1, 0);
-      }
+    if (direction === "previous") {
+      props.onCurrentParagraphIndexChange(Math.max(props.currentParagraphIndex - 1, 0));
+      return;
+    }
 
-      return Math.min(currentIndex + 1, paragraphs.length - 1);
-    });
+    props.onCurrentParagraphIndexChange(Math.min(props.currentParagraphIndex + 1, paragraphs.length - 1));
   }
 
   return (
@@ -656,7 +638,7 @@ function ReaderScreen(props: {
             <span className="reader-chip">{fileTypeLabel}</span>
             <span className="reader-chip">
               {paragraphs.length > 0
-                ? `Paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}`
+                ? `Paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}`
                 : "Paragraph 0 of 0"}
             </span>
             <span className="reader-chip">
@@ -678,9 +660,9 @@ function ReaderScreen(props: {
                 ref={(element) => {
                   paragraphRefs.current[index] = element;
                 }}
-                className={index === currentParagraphIndex ? "reader-paragraph current-paragraph" : "reader-paragraph"}
+                className={index === props.currentParagraphIndex ? "reader-paragraph current-paragraph" : "reader-paragraph"}
                 role="listitem"
-                aria-current={index === currentParagraphIndex ? "true" : undefined}
+                aria-current={index === props.currentParagraphIndex ? "true" : undefined}
               >
                 {paragraph}
               </p>
@@ -721,13 +703,13 @@ function ReaderScreen(props: {
 
         <div className="playback-secondary-row">
           <div className="playback-group" aria-label="Paragraph navigation">
-            <button type="button" onClick={() => moveToParagraph("previous")} disabled={!hasText || currentParagraphIndex === 0}>
+            <button type="button" onClick={() => moveToParagraph("previous")} disabled={!hasText || props.currentParagraphIndex === 0}>
               Previous paragraph
             </button>
             <button
               type="button"
               onClick={() => moveToParagraph("next")}
-              disabled={!hasText || currentParagraphIndex >= paragraphs.length - 1}
+              disabled={!hasText || props.currentParagraphIndex >= paragraphs.length - 1}
             >
               Next paragraph
             </button>
@@ -744,12 +726,12 @@ function ReaderScreen(props: {
               min="0.5"
               max="2"
               step="0.1"
-              value={playbackRate}
+              value={props.playbackRate}
               onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
               aria-describedby={speedValueId}
             />
             <span id={speedValueId} className="hint playback-speed-value">
-              {playbackRate.toFixed(1)}x
+              {props.playbackRate.toFixed(1)}x
             </span>
           </label>
 
@@ -765,7 +747,7 @@ function ReaderScreen(props: {
             </p>
             <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
               {paragraphs.length > 0
-                ? `Position: paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}.`
+                ? `Position: paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
                 : "Position: no document loaded."}
             </p>
             <p className="hint reader-shortcuts-note">
@@ -840,14 +822,23 @@ function SettingsScreen() {
 }
 
 export function App() {
+  const initialPersistenceState = useMemo(
+    () => (typeof window === "undefined" ? defaultReaderPersistenceState : readReaderPersistenceState(window.localStorage)),
+    []
+  );
   const [activeScreen, setActiveScreen] = useState<ScreenId>("home");
   const [documentState, setDocumentState] = useState<ReaderDocumentState>(emptyReaderDocumentState);
-  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>(initialPersistenceState.recentDocuments);
+  const [currentParagraphIndex, setCurrentParagraphIndex] = useState(initialPersistenceState.lastOpenedParagraphIndex);
+  const [playbackRate, setPlaybackRate] = useState(initialPersistenceState.readingSpeed);
+  const [lastOpenedDocumentPath, setLastOpenedDocumentPath] = useState<string | null>(initialPersistenceState.lastOpenedDocumentPath);
+  const hasAttemptedStartupRestoreRef = useRef(false);
   const currentScreen = screens.find((screen) => screen.id === activeScreen)!;
 
   async function loadDocument(options?: {
     filePath?: string;
     navigateToReader?: boolean;
+    restoreParagraphIndex?: number;
   }) {
     const navigateToReader = options?.navigateToReader ?? false;
 
@@ -860,6 +851,14 @@ export function App() {
       error: null,
       isLoading: true
     }));
+
+    function clearUnavailableLastOpenedPath() {
+      if (!options?.filePath) {
+        return;
+      }
+
+      setLastOpenedDocumentPath((current) => (current === options.filePath ? null : current));
+    }
 
     try {
       const result: OpenDocumentResult = options?.filePath
@@ -876,6 +875,7 @@ export function App() {
       }
 
       if ("error" in result && result.error) {
+        clearUnavailableLastOpenedPath();
         setDocumentState((current) => ({
           ...current,
           error: result.error,
@@ -885,6 +885,7 @@ export function App() {
       }
 
       if (!isOpenDocumentSuccessResult(result)) {
+        clearUnavailableLastOpenedPath();
         setDocumentState((current) => ({
           ...current,
           error: "Phronon could not open the selected file.",
@@ -896,11 +897,14 @@ export function App() {
       const nextDocumentState = createLoadedDocumentState(result);
       setDocumentState(nextDocumentState);
       setRecentDocuments((current) => upsertRecentDocument(current, result));
+      setLastOpenedDocumentPath(result.filePath);
+      setCurrentParagraphIndex(clampParagraphIndex(options?.restoreParagraphIndex ?? 0));
 
       if (navigateToReader) {
         setActiveScreen("reader");
       }
     } catch {
+      clearUnavailableLastOpenedPath();
       setDocumentState((current) => ({
         ...current,
         error: "Phronon could not open the selected file.",
@@ -908,6 +912,33 @@ export function App() {
       }));
     }
   }
+
+  useEffect(() => {
+    writeReaderPersistenceState(typeof window === "undefined" ? undefined : window.localStorage, {
+      recentDocuments,
+      readingSpeed: clampReadingSpeed(playbackRate),
+      lastOpenedDocumentPath,
+      lastOpenedParagraphIndex:
+        documentState.filePath && documentState.text ? clampParagraphIndex(currentParagraphIndex) : 0
+    });
+  }, [currentParagraphIndex, documentState.filePath, documentState.text, lastOpenedDocumentPath, playbackRate, recentDocuments]);
+
+  useEffect(() => {
+    if (hasAttemptedStartupRestoreRef.current) {
+      return;
+    }
+
+    hasAttemptedStartupRestoreRef.current = true;
+
+    if (!initialPersistenceState.lastOpenedDocumentPath) {
+      return;
+    }
+
+    void loadDocument({
+      filePath: initialPersistenceState.lastOpenedDocumentPath,
+      restoreParagraphIndex: initialPersistenceState.lastOpenedParagraphIndex
+    });
+  }, [initialPersistenceState.lastOpenedDocumentPath, initialPersistenceState.lastOpenedParagraphIndex]);
 
   return (
     <div className="app-shell">
@@ -955,7 +986,11 @@ export function App() {
           {activeScreen === "reader" && (
             <ReaderScreen
               documentState={documentState}
+              currentParagraphIndex={currentParagraphIndex}
+              onCurrentParagraphIndexChange={(nextIndex) => setCurrentParagraphIndex(clampParagraphIndex(nextIndex))}
               onOpenDocument={() => loadDocument()}
+              playbackRate={playbackRate}
+              onPlaybackRateChange={(nextRate) => setPlaybackRate(clampReadingSpeed(nextRate))}
             />
           )}
           {activeScreen === "settings" && <SettingsScreen />}
