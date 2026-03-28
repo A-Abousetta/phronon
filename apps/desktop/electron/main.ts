@@ -12,6 +12,8 @@ const projectRoot = path.resolve(__dirname, "../../..");
 const backendSourcePath = path.join(projectRoot, "backend", "src");
 const windowsProjectPython = path.join(projectRoot, ".venv", "Scripts", "python.exe");
 const projectPython = path.join(projectRoot, ".venv", "bin", "python");
+const desktopPublicPath = path.join(projectRoot, "apps", "desktop", "public");
+const desktopIconPath = path.join(desktopPublicPath, "icons", "phronon.ico");
 
 type PdfExtractionFailureReason =
   | "backend_invocation_failed"
@@ -129,6 +131,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     autoHideMenuBar: true,
+    icon: desktopIconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

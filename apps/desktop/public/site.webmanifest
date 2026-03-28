@@ -1,0 +1,20 @@
+{
+  "name": "Phronon",
+  "short_name": "Phronon",
+  "description": "Accessibility-first reading and listening assistant.",
+  "theme_color": "#1f2b28",
+  "background_color": "#afded6",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "/phronon-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/phronon-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
