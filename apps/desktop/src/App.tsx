@@ -1,6 +1,11 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
-import { getReaderShortcutAction, isInteractiveElement, splitIntoParagraphs } from "./readerControls";
+import {
+  getReaderShortcutAction,
+  isInteractiveElement,
+  splitIntoParagraphs,
+  splitParagraphIntoSpeechChunks
+} from "./readerControls";
 
 type ScreenId = "home" | "reader" | "settings";
 
@@ -52,30 +57,46 @@ function SectionCard(props: {
 
 function HomeScreen() {
   return (
-    <div className="screen-grid">
-      <SectionCard
-        title="Import study material"
-        description="Placeholder area for document import. Keyboard action comes first."
-      >
-        <div className="stack">
-          <button className="primary-button" type="button">
-            Import File
-          </button>
-          <p className="hint">Planned support: TXT, PDF, and image files.</p>
+    <section className="page-workspace" aria-label="Home workspace">
+      <div className="page-banner">
+        <div>
+          <p className="page-banner-label">Home</p>
+          <h2>Start studying without extra clutter</h2>
+          <p className="page-banner-text">
+            Keep import and recent material close at hand in a simple, keyboard-first workspace.
+          </p>
         </div>
-      </SectionCard>
+        <button className="primary-button" type="button">
+          Import File
+        </button>
+      </div>
 
-      <SectionCard
-        title="Recent documents"
-        description="Placeholder list for recently opened study material."
-      >
-        <ul className="plain-list" aria-label="Recent documents">
-          <li>Biology Chapter 3.txt</li>
-          <li>Arabic Literature Notes.pdf</li>
-          <li>World History Scan.jpg</li>
-        </ul>
-      </SectionCard>
-    </div>
+      <div className="page-columns">
+        <section className="panel-section" aria-labelledby="home-import-title">
+          <div className="panel-section-header">
+            <p className="panel-kicker">Quick start</p>
+            <h3 id="home-import-title">Import study material</h3>
+            <p>Bring in a file and move into reading with as few steps as possible.</p>
+          </div>
+          <div className="stack">
+            <p className="hint">Planned support: TXT, PDF, and image files.</p>
+          </div>
+        </section>
+
+        <section className="panel-section" aria-labelledby="home-recent-title">
+          <div className="panel-section-header">
+            <p className="panel-kicker">Recent</p>
+            <h3 id="home-recent-title">Continue where you left off</h3>
+            <p>Recent study material stays visible without taking over the screen.</p>
+          </div>
+          <ul className="simple-list" aria-label="Recent documents">
+            <li>Biology Chapter 3.txt</li>
+            <li>Arabic Literature Notes.pdf</li>
+            <li>World History Scan.jpg</li>
+          </ul>
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -92,6 +113,11 @@ type PlaybackState = "idle" | "playing" | "paused";
 type PlaybackRange = {
   startIndex: number;
   endIndex: number;
+};
+
+type PlaybackPosition = {
+  paragraphIndex: number;
+  chunkIndex: number;
 };
 
 function ReaderScreen() {
@@ -111,6 +137,7 @@ function ReaderScreen() {
   const paragraphRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const readerPanelRef = useRef<HTMLDivElement | null>(null);
   const playbackRangeRef = useRef<PlaybackRange | null>(null);
+  const playbackPositionRef = useRef<PlaybackPosition | null>(null);
   const playbackSessionRef = useRef(0);
   const playbackStateRef = useRef<PlaybackState>("idle");
   const playbackRateRef = useRef(1);
@@ -134,6 +161,7 @@ function ReaderScreen() {
   function stopPlayback(message: string, nextState: PlaybackState = "idle") {
     playbackSessionRef.current += 1;
     playbackRangeRef.current = null;
+    playbackPositionRef.current = null;
     utteranceRef.current = null;
     restartPausedParagraphRef.current = false;
 
@@ -145,7 +173,7 @@ function ReaderScreen() {
     setPlaybackMessage(message);
   }
 
-  function playParagraphChunk(paragraphIndex: number, sessionId: number, startMessage: string) {
+  function playSpeechChunk(paragraphIndex: number, chunkIndex: number, sessionId: number, startMessage: string) {
     if (!("speechSynthesis" in window)) {
       stopPlayback("Speech playback is not available in this version of the app.");
       return;
@@ -164,13 +192,30 @@ function ReaderScreen() {
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(paragraph);
+    const speechChunks = splitParagraphIntoSpeechChunks(paragraph);
+    const currentChunk = speechChunks[chunkIndex];
+
+    if (!currentChunk) {
+      if (paragraphIndex >= playbackRange.endIndex) {
+        stopPlayback("Playback finished.");
+        return;
+      }
+
+      playSpeechChunk(paragraphIndex + 1, 0, sessionId, startMessage);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(currentChunk);
     utterance.rate = playbackRateRef.current;
     utterance.onstart = () => {
       if (sessionId !== playbackSessionRef.current) {
         return;
       }
 
+      playbackPositionRef.current = {
+        paragraphIndex,
+        chunkIndex
+      };
       utteranceRef.current = utterance;
       setCurrentParagraphIndex(paragraphIndex);
       setPlaybackState("playing");
@@ -186,13 +231,22 @@ function ReaderScreen() {
       }
 
       utteranceRef.current = null;
+      playbackPositionRef.current = {
+        paragraphIndex,
+        chunkIndex: chunkIndex + 1
+      };
+
+      if (chunkIndex < speechChunks.length - 1) {
+        playSpeechChunk(paragraphIndex, chunkIndex + 1, sessionId, startMessage);
+        return;
+      }
 
       if (paragraphIndex >= playbackRange.endIndex) {
         stopPlayback("Playback finished.");
         return;
       }
 
-      playParagraphChunk(paragraphIndex + 1, sessionId, startMessage);
+      playSpeechChunk(paragraphIndex + 1, 0, sessionId, startMessage);
     };
     utterance.onerror = () => {
       if (sessionId !== playbackSessionRef.current || utteranceRef.current !== utterance) {
@@ -205,7 +259,12 @@ function ReaderScreen() {
     window.speechSynthesis.speak(utterance);
   }
 
-  function startChunkedPlayback(startIndex: number, endIndex: number, startMessage: string) {
+  function startChunkedPlayback(
+    startIndex: number,
+    endIndex: number,
+    startMessage: string,
+    startChunkIndex = 0
+  ) {
     if (paragraphs.length === 0) {
       setPlaybackState("idle");
       setPlaybackMessage("Load a document with readable paragraphs before starting playback.");
@@ -227,16 +286,21 @@ function ReaderScreen() {
       startIndex: safeStartIndex,
       endIndex: safeEndIndex
     };
+    playbackPositionRef.current = {
+      paragraphIndex: safeStartIndex,
+      chunkIndex: Math.max(startChunkIndex, 0)
+    };
     restartPausedParagraphRef.current = false;
     utteranceRef.current = null;
     window.speechSynthesis.cancel();
-    playParagraphChunk(safeStartIndex, sessionId, startMessage);
+    playSpeechChunk(safeStartIndex, Math.max(startChunkIndex, 0), sessionId, startMessage);
   }
 
   useEffect(() => {
     return () => {
       playbackSessionRef.current += 1;
       playbackRangeRef.current = null;
+      playbackPositionRef.current = null;
       utteranceRef.current = null;
       restartPausedParagraphRef.current = false;
 
@@ -250,6 +314,7 @@ function ReaderScreen() {
     if (!("speechSynthesis" in window)) {
       utteranceRef.current = null;
       playbackRangeRef.current = null;
+      playbackPositionRef.current = null;
       restartPausedParagraphRef.current = false;
       setPlaybackState("idle");
       setPlaybackMessage("Speech playback is not available in this version of the app.");
@@ -258,6 +323,7 @@ function ReaderScreen() {
 
     playbackSessionRef.current += 1;
     playbackRangeRef.current = null;
+    playbackPositionRef.current = null;
     utteranceRef.current = null;
     restartPausedParagraphRef.current = false;
     window.speechSynthesis.cancel();
@@ -354,10 +420,15 @@ function ReaderScreen() {
       restartPausedParagraphRef.current &&
       playbackRangeRef.current
     ) {
+      const pausedPosition = playbackPositionRef.current;
+      const resumeParagraphIndex = pausedPosition?.paragraphIndex ?? currentParagraphIndex;
+      const resumeChunkIndex = pausedPosition?.chunkIndex ?? 0;
+
       startChunkedPlayback(
-        currentParagraphIndex,
+        resumeParagraphIndex,
         playbackRangeRef.current.endIndex,
-        `Playback resumed from paragraph ${currentParagraphIndex + 1} of ${paragraphs.length} at ${playbackRateRef.current.toFixed(1)}x.`
+        `Playback resumed from paragraph ${resumeParagraphIndex + 1} of ${paragraphs.length} at ${playbackRateRef.current.toFixed(1)}x.`,
+        resumeChunkIndex
       );
       return;
     }
@@ -425,7 +496,7 @@ function ReaderScreen() {
 
     if (playbackStateRef.current === "playing" && playbackRangeRef.current) {
       setPlaybackMessage(
-        `Reading speed set to ${safeNextRate.toFixed(1)}x. It will apply on the next paragraph.`
+        `Reading speed set to ${safeNextRate.toFixed(1)}x. It will apply on the next sentence or paragraph.`
       );
       return;
     }
@@ -523,68 +594,92 @@ function ReaderScreen() {
         : playbackMessage === "Playback stopped."
           ? "stopped"
           : "ready";
+  const fileLabel = documentState.filePath ? documentState.filePath.split(/[\\/]/).pop() ?? documentState.filePath : "No file loaded";
+  const fileTypeLabel = documentState.fileType === "pdf" ? "PDF" : documentState.fileType === "txt" ? "TXT" : "No file";
+
+  function moveToParagraph(direction: "previous" | "next") {
+    setCurrentParagraphIndex((currentIndex) => {
+      if (paragraphs.length === 0) {
+        return 0;
+      }
+
+      if (direction === "previous") {
+        return Math.max(currentIndex - 1, 0);
+      }
+
+      return Math.min(currentIndex + 1, paragraphs.length - 1);
+    });
+  }
 
   return (
-    <div className="screen-grid">
-      <SectionCard
-        title="Open a document"
-        description="Choose a plain text file or a text-based PDF and read it directly in the accessible reader area."
-      >
-        <div className="stack">
+    <section className="reader-workspace" aria-label="Reader workspace">
+      <div className="reader-toolbar">
+        <div className="reader-toolbar-main">
+          <div>
+            <p className="reader-toolbar-label">Reader</p>
+            <h2>Focused reading workspace</h2>
+          </div>
           <button
             className="primary-button"
             type="button"
             onClick={handleOpenFile}
             disabled={documentState.isLoading}
           >
-            {documentState.isLoading ? "Opening document..." : "Open .txt or .pdf file"}
+            {documentState.isLoading ? "Opening document..." : "Open file"}
           </button>
-          <p className={documentState.error ? "status-message error-text" : "status-message"} aria-live="polite">
+        </div>
+
+        <div className="reader-meta" aria-live="polite">
+          <p className="reader-file-name">{fileLabel}</p>
+          <div className="reader-meta-row">
+            <span className="reader-chip">{fileTypeLabel}</span>
+            <span className="reader-chip">
+              {paragraphs.length > 0
+                ? `Paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}`
+                : "Paragraph 0 of 0"}
+            </span>
+            <span className="reader-chip">
+              {documentState.isLoading ? "Loading" : playbackStatusLabel === "waiting for a file" ? "Ready to load" : playbackStatusLabel}
+            </span>
+          </div>
+          <p className={documentState.error ? "status-message error-text compact-status" : "status-message compact-status"}>
             {statusMessage}
           </p>
         </div>
-      </SectionCard>
+      </div>
 
-      <SectionCard
-        title="Document text"
-        description="The extracted text from the selected document appears here, split into readable paragraphs."
-      >
-        <div ref={readerPanelRef} className="reader-panel" tabIndex={-1} aria-label="Document text area">
-          {paragraphs.length > 0 ? (
-            <div className="reader-text" role="list" aria-label="Document paragraphs">
-              {paragraphs.map((paragraph, index) => (
-                <p
-                  key={`${index}-${paragraph.slice(0, 32)}`}
-                  ref={(element) => {
-                    paragraphRefs.current[index] = element;
-                  }}
-                  className={index === currentParagraphIndex ? "reader-paragraph current-paragraph" : "reader-paragraph"}
-                  role="listitem"
-                  aria-current={index === currentParagraphIndex ? "true" : undefined}
-                >
-                  {paragraph}
-                </p>
-              ))}
-            </div>
-          ) : (
-            <p className="empty-state">
-              No file is loaded. Use the &quot;Open .txt or .pdf file&quot; button to choose a readable document.
+      <div ref={readerPanelRef} className="reader-panel reader-panel-expanded" tabIndex={-1} aria-label="Document text area">
+        {paragraphs.length > 0 ? (
+          <div className="reader-text" role="list" aria-label="Document paragraphs">
+            {paragraphs.map((paragraph, index) => (
+              <p
+                key={`${index}-${paragraph.slice(0, 32)}`}
+                ref={(element) => {
+                  paragraphRefs.current[index] = element;
+                }}
+                className={index === currentParagraphIndex ? "reader-paragraph current-paragraph" : "reader-paragraph"}
+                role="listitem"
+                aria-current={index === currentParagraphIndex ? "true" : undefined}
+              >
+                {paragraph}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <div className="reader-empty-state">
+            <p className="reader-empty-eyebrow">Ready to read</p>
+            <p className="empty-state">Open a readable `.txt` or text-based `.pdf` document to begin.</p>
+            <p className="hint">Use `Open file` above or press `Ctrl+O`.</p>
+            <p className="hint reader-empty-shortcuts">
+              Playback shortcuts remain available: `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, and `Alt+Down`.
             </p>
-          )}
-        </div>
-      </SectionCard>
+          </div>
+        )}
+      </div>
 
-      <SectionCard
-        title="Playback controls"
-        description="Use local device speech to read the loaded text aloud."
-      >
-        <div className="controls" role="group" aria-label="Playback controls">
-          <p className="hint">
-            Shortcuts: Ctrl+O opens a document, Space plays, pauses, or resumes from the current paragraph, S stops
-            playback, J and K move between paragraphs, R repeats the current paragraph, and Alt+Up or Alt+Down adjust
-            speed.
-          </p>
-          <button type="button" onClick={handlePlay} aria-describedby="playback-status">
+      <div className="reader-playback-bar" role="group" aria-label="Playback controls">
+        <div className="playback-group playback-group-primary" aria-label="Primary playback actions">
+          <button className="playback-primary-button" type="button" onClick={handlePlay} aria-describedby="playback-status">
             {playbackState === "paused" ? "Resume" : "Play"}
           </button>
           <button
@@ -601,9 +696,29 @@ function ReaderScreen() {
           >
             Stop
           </button>
-          <label className="field">
-            <span>Reading speed</span>
+        </div>
+
+        <div className="playback-secondary-row">
+          <div className="playback-group" aria-label="Paragraph navigation">
+            <button type="button" onClick={() => moveToParagraph("previous")} disabled={!hasText || currentParagraphIndex === 0}>
+              Previous paragraph
+            </button>
+            <button
+              type="button"
+              onClick={() => moveToParagraph("next")}
+              disabled={!hasText || currentParagraphIndex >= paragraphs.length - 1}
+            >
+              Next paragraph
+            </button>
+            <button type="button" onClick={handleRepeatCurrentParagraph} disabled={!hasText}>
+              Repeat paragraph
+            </button>
+          </div>
+
+          <label className="field playback-speed" aria-label="Playback speed">
+            <span>Speed</span>
             <input
+              className="brand-slider"
               type="range"
               min="0.5"
               max="2"
@@ -612,27 +727,34 @@ function ReaderScreen() {
               onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
               aria-describedby={speedValueId}
             />
-            <span id={speedValueId} className="hint">
-              Current speed: {playbackRate.toFixed(1)}x
+            <span id={speedValueId} className="hint playback-speed-value">
+              {playbackRate.toFixed(1)}x
             </span>
           </label>
-          <p
-            id="playback-status"
-            className={statusToneClass}
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <strong>Playback status:</strong> {playbackStatusLabel}. {playbackMessage}
-          </p>
-          <p className="status-message" role="status" aria-live="polite" aria-atomic="true">
-            {paragraphs.length > 0
-              ? `Current paragraph: ${currentParagraphIndex + 1} of ${paragraphs.length}.`
-              : "Current paragraph: no document loaded."}
-          </p>
+
+          <div className="playback-readout">
+            <p
+              id="playback-status"
+              className={statusToneClass}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              <strong>Playback:</strong> {playbackStatusLabel}. {playbackMessage}
+            </p>
+            <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+              {paragraphs.length > 0
+                ? `Position: paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}.`
+                : "Position: no document loaded."}
+            </p>
+            <p className="hint reader-shortcuts-note">
+              Shortcuts: Ctrl+O open file, Space play or pause, S stop, J and K move, R repeat, Alt+Up or Alt+Down
+              speed.
+            </p>
+          </div>
         </div>
-      </SectionCard>
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -641,42 +763,58 @@ function SettingsScreen() {
   const startupId = useId();
 
   return (
-    <div className="screen-grid">
-      <SectionCard
-        title="Interface settings"
-        description="Minimal preferences placeholders with clear labels."
-      >
-        <div className="form-grid">
-          <label className="field" htmlFor={languageId}>
-            <span>Interface language</span>
-            <select id={languageId} defaultValue="en">
-              <option value="en">English</option>
-              <option value="ar">Arabic</option>
-            </select>
-          </label>
-
-          <label className="field" htmlFor={startupId}>
-            <span>Open on startup</span>
-            <select id={startupId} defaultValue="home">
-              <option value="home">Home</option>
-              <option value="reader">Reader</option>
-              <option value="settings">Settings</option>
-            </select>
-          </label>
+    <section className="page-workspace" aria-label="Settings workspace">
+      <div className="page-banner">
+        <div>
+          <p className="page-banner-label">Settings</p>
+          <h2>Simple preferences, easy to review</h2>
+          <p className="page-banner-text">
+            Keep default choices clear and accessible without adding extra noise.
+          </p>
         </div>
-      </SectionCard>
+      </div>
 
-      <SectionCard
-        title="Accessibility notes"
-        description="Accessibility commitments for the first version."
-      >
-        <ul className="plain-list">
-          <li>Keyboard navigation is available for every main action.</li>
-          <li>Focus states stay visible.</li>
-          <li>Screen labels remain explicit and simple.</li>
-        </ul>
-      </SectionCard>
-    </div>
+      <div className="page-columns">
+        <section className="panel-section" aria-labelledby="settings-interface-title">
+          <div className="panel-section-header">
+            <p className="panel-kicker">Preferences</p>
+            <h3 id="settings-interface-title">Interface settings</h3>
+            <p>Minimal placeholders with clear labels and predictable controls.</p>
+          </div>
+          <div className="form-grid">
+            <label className="field" htmlFor={languageId}>
+              <span>Interface language</span>
+              <select id={languageId} defaultValue="en">
+                <option value="en">English</option>
+                <option value="ar">Arabic</option>
+              </select>
+            </label>
+
+            <label className="field" htmlFor={startupId}>
+              <span>Open on startup</span>
+              <select id={startupId} defaultValue="home">
+                <option value="home">Home</option>
+                <option value="reader">Reader</option>
+                <option value="settings">Settings</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section className="panel-section" aria-labelledby="settings-accessibility-title">
+          <div className="panel-section-header">
+            <p className="panel-kicker">Accessibility</p>
+            <h3 id="settings-accessibility-title">Accessibility notes</h3>
+            <p>Core promises for the first version stay visible and easy to scan.</p>
+          </div>
+          <ul className="simple-list">
+            <li>Keyboard navigation is available for every main action.</li>
+            <li>Focus states stay visible.</li>
+            <li>Screen labels remain explicit and simple.</li>
+          </ul>
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -691,10 +829,12 @@ export function App() {
       </a>
 
       <header className="app-header">
-        <div>
+        <div className="app-header-inner">
           <p className="eyebrow">Phronon</p>
-          <h1>{currentScreen.title}</h1>
-          <p>{currentScreen.description}</p>
+          <div className="app-header-copy">
+            <h1>{currentScreen.title}</h1>
+            <p>{currentScreen.description}</p>
+          </div>
         </div>
       </header>
 

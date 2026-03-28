@@ -36,6 +36,22 @@ export function splitIntoParagraphs(text: string | null) {
     .filter(Boolean);
 }
 
+export function splitParagraphIntoSpeechChunks(paragraph: string) {
+  const normalizedParagraph = paragraph.trim();
+
+  if (!normalizedParagraph) {
+    return [];
+  }
+
+  const sentenceChunks = normalizedParagraph.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g);
+
+  if (!sentenceChunks) {
+    return [normalizedParagraph];
+  }
+
+  return sentenceChunks.map((chunk) => chunk.trim()).filter(Boolean);
+}
+
 export function getReaderShortcutAction(input: ReaderShortcutInput): ReaderShortcutAction | null {
   const normalizedKey = input.key.toLowerCase();
 

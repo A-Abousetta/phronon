@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { getReaderShortcutAction, splitIntoParagraphs } from "./readerControls.js";
+import {
+  getReaderShortcutAction,
+  splitIntoParagraphs,
+  splitParagraphIntoSpeechChunks
+} from "./readerControls.js";
 
 function runTests() {
   const paragraphs = splitIntoParagraphs("First line\nstill first\n\nSecond paragraph\r\n\r\nThird");
@@ -9,6 +13,16 @@ function runTests() {
 
   assert.deepEqual(splitIntoParagraphs(null), []);
   assert.deepEqual(splitIntoParagraphs(" \n \n "), []);
+  assert.deepEqual(splitParagraphIntoSpeechChunks("Single sentence"), ["Single sentence"]);
+  assert.deepEqual(splitParagraphIntoSpeechChunks("First sentence. Second sentence? Third sentence!"), [
+    "First sentence.",
+    "Second sentence?",
+    "Third sentence!"
+  ]);
+  assert.deepEqual(splitParagraphIntoSpeechChunks("First item.\nSecond item."), [
+    "First item.",
+    "Second item."
+  ]);
 
   assert.equal(
     getReaderShortcutAction({
