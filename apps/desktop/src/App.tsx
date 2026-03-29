@@ -39,6 +39,15 @@ import {
   getVoiceDisplayName,
   type SpeechVoicePreference
 } from "./speechVoices";
+import {
+  type BrowserSpeechRecognition,
+  type BrowserSpeechRecognitionErrorEvent,
+  type BrowserSpeechRecognitionEvent,
+  getVoiceReaderCommand,
+  getVoiceRecognitionAvailability,
+  getVoiceRecognitionConstructor,
+  type VoiceReaderCommand
+} from "./voiceCommands";
 
 type ScreenId = "home" | "reader" | "settings";
 
@@ -333,7 +342,10 @@ function ReaderScreen(props: {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
   const [playbackMessage, setPlaybackMessage] = useState("Load a .txt or .pdf file to start playback.");
   const [bookmarkMessage, setBookmarkMessage] = useState("No bookmarks saved for this document yet.");
+  const [voiceCommandMessage, setVoiceCommandMessage] = useState("");
+  const [isListeningForVoiceCommand, setIsListeningForVoiceCommand] = useState(false);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const voiceRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const paragraphRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const readerPanelRef = useRef<HTMLDivElement | null>(null);
   const openFileButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -352,10 +364,31 @@ function ReaderScreen(props: {
   const documentRegionHintId = useId();
   const speedInputId = useId();
   const speedValueId = useId();
+  const voiceCommandStatusId = useId();
   const paragraphs = splitIntoParagraphs(props.documentState.text);
   const hasText = Boolean(props.documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
   const isFilePickerLoading = props.activeLoad?.origin === "filePicker";
+  const voiceRecognitionAvailability = getVoiceRecognitionAvailability(window);
+  const voiceRecognitionAvailable = voiceRecognitionAvailability.available;
+
+  function stopVoiceCommandListening(message?: string) {
+    const recognition = voiceRecognitionRef.current;
+
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      recognition.stop();
+      voiceRecognitionRef.current = null;
+    }
+
+    setIsListeningForVoiceCommand(false);
+
+    if (message) {
+      setVoiceCommandMessage(message);
+    }
+  }
 
   useEffect(() => {
     playbackStateRef.current = playbackState;
@@ -520,6 +553,7 @@ function ReaderScreen(props: {
 
   useEffect(() => {
     return () => {
+      stopVoiceCommandListening();
       playbackSessionRef.current += 1;
       playbackRangeRef.current = null;
       playbackPositionRef.current = null;
@@ -707,6 +741,112 @@ function ReaderScreen(props: {
 
   function changePlaybackRate(step: number) {
     handlePlaybackRateChange(playbackRateRef.current + step);
+  }
+
+  function executeVoiceReaderCommand(command: VoiceReaderCommand) {
+    switch (command) {
+      case "openFile":
+        setVoiceCommandMessage("Voice command heard: open file.");
+        void handleOpenFile();
+        return;
+      case "play":
+        setVoiceCommandMessage("Voice command heard: play.");
+        handlePlay();
+        return;
+      case "pause":
+        setVoiceCommandMessage("Voice command heard: pause.");
+        handlePause();
+        return;
+      case "stop":
+        setVoiceCommandMessage("Voice command heard: stop.");
+        handleStop();
+        return;
+      case "nextParagraph":
+        setVoiceCommandMessage("Voice command heard: next paragraph.");
+        moveToParagraph("next");
+        return;
+      case "previousParagraph":
+        setVoiceCommandMessage("Voice command heard: previous paragraph.");
+        moveToParagraph("previous");
+        return;
+      case "repeatParagraph":
+        setVoiceCommandMessage("Voice command heard: repeat paragraph.");
+        handleRepeatCurrentParagraph();
+        return;
+      case "faster":
+        setVoiceCommandMessage("Voice command heard: faster.");
+        changePlaybackRate(0.1);
+        return;
+      case "slower":
+        setVoiceCommandMessage("Voice command heard: slower.");
+        changePlaybackRate(-0.1);
+        return;
+    }
+  }
+
+  function handleListenForVoiceCommand() {
+    if (!voiceRecognitionAvailable) {
+      setVoiceCommandMessage(voiceRecognitionAvailability.message);
+      return;
+    }
+
+    if (isListeningForVoiceCommand) {
+      stopVoiceCommandListening("Voice command listening stopped.");
+      return;
+    }
+
+    const SpeechRecognitionConstructor = getVoiceRecognitionConstructor(window);
+
+    if (!SpeechRecognitionConstructor) {
+      setVoiceCommandMessage(voiceRecognitionAvailability.message);
+      return;
+    }
+
+    const recognition = new SpeechRecognitionConstructor();
+
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.maxAlternatives = 5;
+    recognition.onresult = (event: BrowserSpeechRecognitionEvent) => {
+      const result = event.results[event.resultIndex];
+      const transcript = result?.[0]?.transcript ?? "";
+      const command = getVoiceReaderCommand(transcript);
+
+      if (!command) {
+        stopVoiceCommandListening(
+          "Voice command was not recognized. Supported commands are open file, play, pause, stop, next paragraph, previous paragraph, repeat paragraph, faster, and slower."
+        );
+        return;
+      }
+
+      stopVoiceCommandListening();
+      executeVoiceReaderCommand(command);
+    };
+    recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
+      stopVoiceCommandListening(
+        event.error === "not-allowed"
+          ? "Microphone permission was denied, so voice command mode could not start."
+          : "Voice command listening failed on this device."
+      );
+    };
+    recognition.onend = () => {
+      voiceRecognitionRef.current = null;
+      setIsListeningForVoiceCommand(false);
+    };
+
+    try {
+      voiceRecognitionRef.current = recognition;
+      setIsListeningForVoiceCommand(true);
+      setVoiceCommandMessage(
+        "Listening for one Reader command. Say open file, play, pause, stop, next paragraph, previous paragraph, repeat paragraph, faster, or slower."
+      );
+      recognition.start();
+    } catch {
+      voiceRecognitionRef.current = null;
+      setIsListeningForVoiceCommand(false);
+      setVoiceCommandMessage("Voice command listening could not start on this device.");
+    }
   }
 
   function moveToParagraph(direction: "previous" | "next") {
@@ -1016,6 +1156,20 @@ function ReaderScreen(props: {
             </button>
           </div>
 
+          <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
+            <button
+              type="button"
+              onClick={handleListenForVoiceCommand}
+              aria-pressed={isListeningForVoiceCommand}
+              aria-describedby={voiceCommandStatusId}
+            >
+              {isListeningForVoiceCommand ? "Stop listening" : "Listen for command"}
+            </button>
+            <p id={voiceCommandStatusId} className="hint">
+              {voiceCommandMessage || voiceRecognitionAvailability.message}
+            </p>
+          </div>
+
           <label className="field playback-speed" htmlFor={speedInputId}>
             <span>Playback speed</span>
             <input
@@ -1063,6 +1217,10 @@ function ReaderScreen(props: {
             <p id={shortcutsHintId} className="hint reader-shortcuts-note">
               Shortcuts: Ctrl+O opens a file anywhere in the app. In Reader, Space plays or pauses, S stops, J and K
               move between paragraphs, R repeats, and Alt+Up or Alt+Down changes speed.
+            </p>
+            <p className="hint reader-shortcuts-note">
+              Voice commands are optional and listen only after you press `Listen for command`. They use exact English
+              phrases and never replace keyboard shortcuts.
             </p>
           </div>
         </div>
