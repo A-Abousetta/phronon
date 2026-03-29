@@ -8,20 +8,25 @@ import {
   splitParagraphIntoSpeechChunks
 } from "./readerControls";
 import {
+  buildBookmarkPreviewText,
   buildDocumentLoadStatusMessage,
   buildDocumentOpenFailureMessage,
   buildReaderDocumentStatusMessage,
   buildRecentDocumentButtonLabel,
   clampParagraphIndex,
   clampReadingSpeed,
+  createParagraphBookmark,
   createLoadedDocumentState,
   defaultReaderPersistenceState,
   emptyReaderDocumentState,
+  getBookmarksForDocument,
   getDocumentFileName,
   readReaderPersistenceState,
+  type ParagraphBookmark,
   type DocumentLoadOrigin,
   type ReaderDocumentState,
   type RecentDocument,
+  upsertParagraphBookmark,
   upsertRecentDocument,
   writeReaderPersistenceState
 } from "./documentWorkflow";
@@ -312,8 +317,10 @@ function HomeScreen(props: {
 function ReaderScreen(props: {
   documentState: ReaderDocumentState;
   activeLoad: ActiveDocumentLoad | null;
+  bookmarks: ParagraphBookmark[];
   currentParagraphIndex: number;
   onCurrentParagraphIndexChange: (nextIndex: number) => void;
+  onAddBookmark: (paragraphIndex: number, paragraphText: string) => void;
   onOpenDocument: () => Promise<void>;
   availableVoices: SpeechSynthesisVoice[];
   voicesInitialized: boolean;
@@ -325,6 +332,7 @@ function ReaderScreen(props: {
 }) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
   const [playbackMessage, setPlaybackMessage] = useState("Load a .txt or .pdf file to start playback.");
+  const [bookmarkMessage, setBookmarkMessage] = useState("No bookmarks saved for this document yet.");
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const paragraphRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const readerPanelRef = useRef<HTMLDivElement | null>(null);
@@ -798,6 +806,34 @@ function ReaderScreen(props: {
   const fileTypeLabel = props.documentState.fileType === "pdf" ? "PDF" : props.documentState.fileType === "txt" ? "TXT" : "No file";
   const currentParagraphId =
     paragraphs.length > 0 ? `reader-paragraph-${props.currentParagraphIndex}` : undefined;
+  const currentParagraphPreview = paragraphs[props.currentParagraphIndex]
+    ? buildBookmarkPreviewText(paragraphs[props.currentParagraphIndex], 72)
+    : null;
+
+  useEffect(() => {
+    setBookmarkMessage(
+      props.bookmarks.length > 0
+        ? `${props.bookmarks.length} bookmark${props.bookmarks.length === 1 ? "" : "s"} saved for this document.`
+        : "No bookmarks saved for this document yet."
+    );
+  }, [props.bookmarks.length, props.documentState.filePath]);
+
+  function handleAddBookmark() {
+    const currentParagraph = paragraphs[props.currentParagraphIndex];
+
+    if (!props.documentState.filePath || !currentParagraph) {
+      setBookmarkMessage("Open a document before saving a bookmark.");
+      return;
+    }
+
+    props.onAddBookmark(props.currentParagraphIndex, currentParagraph);
+    setBookmarkMessage(`Saved bookmark for paragraph ${props.currentParagraphIndex + 1}.`);
+  }
+
+  function handleJumpToBookmark(bookmark: ParagraphBookmark) {
+    props.onCurrentParagraphIndexChange(bookmark.paragraphIndex);
+    setBookmarkMessage(`Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}.`);
+  }
 
   return (
     <section className="reader-workspace" aria-labelledby={headingId}>
@@ -892,6 +928,43 @@ function ReaderScreen(props: {
               Reader shortcuts: `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, and `Alt+Down`.
             </p>
           </div>
+        )}
+      </section>
+
+      <section className="reader-bookmarks" aria-labelledby="reader-bookmarks-title">
+        <div className="reader-bookmarks-header">
+          <div>
+            <p className="reader-toolbar-label">Bookmarks</p>
+            <h3 id="reader-bookmarks-title">Saved markers for this document</h3>
+          </div>
+          <button type="button" onClick={handleAddBookmark} disabled={!hasText || !props.documentState.filePath}>
+            Bookmark current paragraph
+          </button>
+        </div>
+        <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+          {bookmarkMessage}
+        </p>
+        {currentParagraphPreview ? (
+          <p className="hint">Current paragraph preview: {currentParagraphPreview}</p>
+        ) : null}
+        {props.bookmarks.length > 0 ? (
+          <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
+            {props.bookmarks.map((bookmark) => (
+              <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
+                <button
+                  type="button"
+                  className="bookmark-button"
+                  onClick={() => handleJumpToBookmark(bookmark)}
+                  aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
+                >
+                  <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
+                  <span className="bookmark-button-preview">{bookmark.previewText}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="hint">Bookmarks will appear here after you save one from the current paragraph.</p>
         )}
       </section>
 
@@ -1188,6 +1261,9 @@ export function App() {
   const [activeScreen, setActiveScreen] = useState<ScreenId>("home");
   const [documentState, setDocumentState] = useState<ReaderDocumentState>(emptyReaderDocumentState);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>(initialPersistenceState.recentDocuments);
+  const [bookmarksByDocument, setBookmarksByDocument] = useState<Record<string, ParagraphBookmark[]>>(
+    initialPersistenceState.bookmarksByDocument
+  );
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(initialPersistenceState.lastOpenedParagraphIndex);
   const [playbackRate, setPlaybackRate] = useState(initialPersistenceState.readingSpeed);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(initialPersistenceState.hasSeenOnboarding);
@@ -1233,6 +1309,27 @@ export function App() {
   function dismissOnboarding() {
     setHasSeenOnboarding(true);
     announce("Welcome guidance dismissed.");
+  }
+
+  function handleAddBookmark(paragraphIndex: number, paragraphText: string) {
+    if (!documentState.filePath) {
+      return;
+    }
+
+    const nextBookmark = createParagraphBookmark({
+      documentPath: documentState.filePath,
+      paragraphIndex,
+      paragraphText
+    });
+
+    setBookmarksByDocument((current) => ({
+      ...current,
+      [documentState.filePath!]: upsertParagraphBookmark(
+        getBookmarksForDocument(current, documentState.filePath),
+        nextBookmark
+      )
+    }));
+    announce(`Bookmark saved for paragraph ${paragraphIndex + 1}.`);
   }
 
   function isActiveLoadRequest(request: ActiveDocumentLoad) {
@@ -1509,6 +1606,7 @@ export function App() {
   useEffect(() => {
     writeReaderPersistenceState(typeof window === "undefined" ? undefined : window.localStorage, {
       recentDocuments,
+      bookmarksByDocument,
       readingSpeed: clampReadingSpeed(playbackRate),
       speechVoicePreference,
       preferredVoiceId,
@@ -1518,6 +1616,7 @@ export function App() {
       hasSeenOnboarding
     });
   }, [
+    bookmarksByDocument,
     currentParagraphIndex,
     documentState.filePath,
     documentState.text,
@@ -1610,8 +1709,10 @@ export function App() {
             <ReaderScreen
               documentState={documentState}
               activeLoad={activeLoad}
+              bookmarks={getBookmarksForDocument(bookmarksByDocument, documentState.filePath)}
               currentParagraphIndex={currentParagraphIndex}
               onCurrentParagraphIndexChange={(nextIndex) => setCurrentParagraphIndex(clampParagraphIndex(nextIndex))}
+              onAddBookmark={handleAddBookmark}
               onOpenDocument={() => loadDocument({ origin: "filePicker" })}
               availableVoices={availableVoices}
               voicesInitialized={voicesInitialized}

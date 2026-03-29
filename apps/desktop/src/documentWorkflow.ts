@@ -15,8 +15,16 @@ export type RecentDocument = {
   lastOpenedAt: number;
 };
 
+export type ParagraphBookmark = {
+  documentPath: string;
+  paragraphIndex: number;
+  previewText: string;
+  createdAt: number;
+};
+
 export type ReaderPersistenceState = {
   recentDocuments: RecentDocument[];
+  bookmarksByDocument: Record<string, ParagraphBookmark[]>;
   readingSpeed: number;
   speechVoicePreference: SpeechVoicePreference;
   preferredVoiceId: string | null;
@@ -42,6 +50,7 @@ export const emptyReaderDocumentState: ReaderDocumentState = {
 
 export const defaultReaderPersistenceState: ReaderPersistenceState = {
   recentDocuments: [],
+  bookmarksByDocument: {},
   readingSpeed: DEFAULT_READING_SPEED,
   speechVoicePreference: "automatic",
   preferredVoiceId: null,
@@ -139,6 +148,59 @@ export function buildRecentDocumentButtonLabel(document: RecentDocument) {
   return `Open recent ${document.fileType.toUpperCase()} document ${document.fileName}`;
 }
 
+export function buildBookmarkPreviewText(paragraphText: string, maxLength = 96) {
+  const normalizedText = paragraphText.replace(/\s+/g, " ").trim();
+
+  if (!normalizedText) {
+    return "Empty paragraph";
+  }
+
+  if (normalizedText.length <= maxLength) {
+    return normalizedText;
+  }
+
+  return `${normalizedText.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+export function createParagraphBookmark(options: {
+  documentPath: string;
+  paragraphIndex: number;
+  paragraphText: string;
+  now?: number;
+}): ParagraphBookmark {
+  return {
+    documentPath: options.documentPath,
+    paragraphIndex: clampParagraphIndex(options.paragraphIndex),
+    previewText: buildBookmarkPreviewText(options.paragraphText),
+    createdAt: options.now ?? Date.now()
+  };
+}
+
+export function upsertParagraphBookmark(
+  bookmarks: ParagraphBookmark[],
+  nextBookmark: ParagraphBookmark
+) {
+  const otherBookmarks = bookmarks.filter(
+    (bookmark) =>
+      !(bookmark.documentPath === nextBookmark.documentPath && bookmark.paragraphIndex === nextBookmark.paragraphIndex)
+  );
+
+  return [nextBookmark, ...otherBookmarks]
+    .sort((left, right) => left.paragraphIndex - right.paragraphIndex)
+    .slice(0, 100);
+}
+
+export function getBookmarksForDocument(
+  bookmarksByDocument: Record<string, ParagraphBookmark[]>,
+  documentPath: string | null | undefined
+) {
+  if (!documentPath) {
+    return [];
+  }
+
+  return bookmarksByDocument[documentPath] ?? [];
+}
+
 export function buildDocumentLoadStatusMessage(options: {
   origin: DocumentLoadOrigin;
   filePath?: string | null;
@@ -192,6 +254,22 @@ function isRecentDocument(value: unknown): value is RecentDocument {
   );
 }
 
+function isParagraphBookmark(value: unknown): value is ParagraphBookmark {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<ParagraphBookmark>;
+  return (
+    typeof candidate.documentPath === "string" &&
+    typeof candidate.previewText === "string" &&
+    typeof candidate.createdAt === "number" &&
+    Number.isFinite(candidate.createdAt) &&
+    typeof candidate.paragraphIndex === "number" &&
+    Number.isFinite(candidate.paragraphIndex)
+  );
+}
+
 export function parseReaderPersistenceState(rawValue: string | null): ReaderPersistenceState {
   if (!rawValue) {
     return defaultReaderPersistenceState;
@@ -204,9 +282,30 @@ export function parseReaderPersistenceState(rawValue: string | null): ReaderPers
     const recentDocuments = Array.isArray(parsed.recentDocuments)
       ? parsed.recentDocuments.filter(isRecentDocument).slice(0, 8)
       : [];
+    const bookmarksByDocument =
+      parsed.bookmarksByDocument && typeof parsed.bookmarksByDocument === "object"
+        ? Object.fromEntries(
+            Object.entries(parsed.bookmarksByDocument)
+              .filter(([documentPath]) => typeof documentPath === "string" && documentPath.trim().length > 0)
+              .map(([documentPath, bookmarks]) => [
+                documentPath,
+                Array.isArray(bookmarks)
+                  ? bookmarks
+                      .filter(isParagraphBookmark)
+                      .map((bookmark) => ({
+                        ...bookmark,
+                        paragraphIndex: clampParagraphIndex(bookmark.paragraphIndex)
+                      }))
+                      .sort((left, right) => left.paragraphIndex - right.paragraphIndex)
+                      .slice(0, 100)
+                  : []
+              ])
+          )
+        : {};
 
     return {
       recentDocuments,
+      bookmarksByDocument,
       readingSpeed: clampReadingSpeed(
         typeof parsed.readingSpeed === "number" ? parsed.readingSpeed : DEFAULT_READING_SPEED
       ),
