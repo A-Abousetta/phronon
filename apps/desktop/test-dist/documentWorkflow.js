@@ -13,6 +13,9 @@ export const defaultReaderPersistenceState = {
     recentDocuments: [],
     bookmarksByDocument: {},
     readingSpeed: DEFAULT_READING_SPEED,
+    interfaceTextScale: "default",
+    readerTextScale: "default",
+    contrastMode: "default",
     speechVoicePreference: "automatic",
     preferredVoiceId: null,
     lastOpenedDocumentPath: null,
@@ -35,6 +38,15 @@ export function clampReadingSpeed(value) {
     }
     const roundedValue = Math.round(value * 10) / 10;
     return Math.min(MAX_READING_SPEED, Math.max(MIN_READING_SPEED, roundedValue));
+}
+export function parseInterfaceTextScale(value) {
+    return value === "large" || value === "largest" ? value : "default";
+}
+export function parseReaderTextScale(value) {
+    return value === "large" || value === "largest" ? value : "default";
+}
+export function parseContrastMode(value) {
+    return value === "strong" ? "strong" : "default";
 }
 export function createLoadedDocumentState(result) {
     return {
@@ -185,6 +197,9 @@ export function parseReaderPersistenceState(rawValue) {
             recentDocuments,
             bookmarksByDocument,
             readingSpeed: clampReadingSpeed(typeof parsed.readingSpeed === "number" ? parsed.readingSpeed : DEFAULT_READING_SPEED),
+            interfaceTextScale: parseInterfaceTextScale(parsed.interfaceTextScale),
+            readerTextScale: parseReaderTextScale(parsed.readerTextScale),
+            contrastMode: parseContrastMode(parsed.contrastMode),
             speechVoicePreference: parsed.speechVoicePreference === "default"
                 ? "default"
                 : parsed.speechVoicePreference === "manual"

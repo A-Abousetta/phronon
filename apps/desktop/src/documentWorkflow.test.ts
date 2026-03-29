@@ -82,6 +82,9 @@ test("parseReaderPersistenceState returns safe defaults for invalid data", () =>
     recentDocuments: [],
     bookmarksByDocument: {},
     readingSpeed: 1,
+    interfaceTextScale: "default",
+    readerTextScale: "default",
+    contrastMode: "default",
     speechVoicePreference: "automatic",
     preferredVoiceId: null,
     lastOpenedDocumentPath: null,
@@ -118,6 +121,9 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
       ]
     },
     readingSpeed: 2.7,
+    interfaceTextScale: "largest",
+    readerTextScale: "large",
+    contrastMode: "strong",
     speechVoicePreference: "manual",
     preferredVoiceId: "uri:voice-ar-sa",
     lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
@@ -145,12 +151,27 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
       ]
     },
     readingSpeed: 2,
+    interfaceTextScale: "largest",
+    readerTextScale: "large",
+    contrastMode: "strong",
     speechVoicePreference: "manual",
     preferredVoiceId: "uri:voice-ar-sa",
     lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
     lastOpenedParagraphIndex: 4,
     hasSeenOnboarding: true
   });
+});
+
+test("parseReaderPersistenceState falls back for invalid display preferences", () => {
+  const parsed = parseReaderPersistenceState(JSON.stringify({
+    interfaceTextScale: "huge",
+    readerTextScale: 2,
+    contrastMode: "extra"
+  }));
+
+  assert.equal(parsed.interfaceTextScale, "default");
+  assert.equal(parsed.readerTextScale, "default");
+  assert.equal(parsed.contrastMode, "default");
 });
 
 test("reading and paragraph clamps keep persisted values in range", () => {
