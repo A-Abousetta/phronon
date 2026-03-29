@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getReaderShortcutAction, splitIntoParagraphs, splitParagraphIntoSpeechChunks } from "./readerControls.js";
+import { getAppShortcutAction, getReaderShortcutAction, splitIntoParagraphs, splitParagraphIntoSpeechChunks } from "./readerControls.js";
 function runTests() {
     const paragraphs = splitIntoParagraphs("First line\nstill first\n\nSecond paragraph\r\n\r\nThird");
     assert.deepEqual(paragraphs, ["First line still first", "Second paragraph", "Third"]);
@@ -15,13 +15,20 @@ function runTests() {
         "First item.",
         "Second item."
     ]);
+    assert.equal(getAppShortcutAction({
+        key: "o",
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false
+    }), "openDocument");
     assert.equal(getReaderShortcutAction({
         key: "o",
         ctrlKey: true,
         metaKey: false,
         altKey: false,
         shiftKey: false
-    }), "open");
+    }), null);
     assert.equal(getReaderShortcutAction({
         key: " ",
         code: "Space",

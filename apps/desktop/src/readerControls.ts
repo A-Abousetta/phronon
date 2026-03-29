@@ -1,5 +1,6 @@
+export type AppShortcutAction = "openDocument";
+
 export type ReaderShortcutAction =
-  | "open"
   | "togglePlayPause"
   | "stop"
   | "nextParagraph"
@@ -17,7 +18,7 @@ export type ReaderShortcutInput = {
   shiftKey: boolean;
 };
 
-const plainReaderShortcutMap: Record<string, Exclude<ReaderShortcutAction, "open" | "togglePlayPause">> = {
+const plainReaderShortcutMap: Record<string, Exclude<ReaderShortcutAction, "togglePlayPause">> = {
   j: "nextParagraph",
   k: "previousParagraph",
   r: "repeatCurrentParagraph",
@@ -52,11 +53,21 @@ export function splitParagraphIntoSpeechChunks(paragraph: string) {
   return sentenceChunks.map((chunk) => chunk.trim()).filter(Boolean);
 }
 
-export function getReaderShortcutAction(input: ReaderShortcutInput): ReaderShortcutAction | null {
+export function getAppShortcutAction(input: ReaderShortcutInput): AppShortcutAction | null {
   const normalizedKey = input.key.toLowerCase();
 
   if (input.ctrlKey && !input.metaKey && !input.altKey && !input.shiftKey && normalizedKey === "o") {
-    return "open";
+    return "openDocument";
+  }
+
+  return null;
+}
+
+export function getReaderShortcutAction(input: ReaderShortcutInput): ReaderShortcutAction | null {
+  const normalizedKey = input.key.toLowerCase();
+
+  if (getAppShortcutAction(input)) {
+    return null;
   }
 
   if (!input.ctrlKey && !input.metaKey && input.altKey && !input.shiftKey) {

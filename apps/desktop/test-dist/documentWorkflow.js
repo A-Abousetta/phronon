@@ -41,6 +41,17 @@ export function createLoadedDocumentState(result) {
         isLoading: false
     };
 }
+export function buildDocumentOpenFailureMessage(options) {
+    const attemptedFileName = options.attemptedFilePath
+        ? getDocumentFileName(options.attemptedFilePath)
+        : "the selected document";
+    const currentFileName = options.currentFilePath ? getDocumentFileName(options.currentFilePath) : null;
+    const reason = options.reason?.trim() || "Phronon could not open that document.";
+    const currentDocumentMessage = currentFileName
+        ? ` ${currentFileName} is still open.`
+        : " No document was replaced.";
+    return `${attemptedFileName} did not open. ${reason}${currentDocumentMessage}`;
+}
 export function upsertRecentDocument(recentDocuments, documentState, now = Date.now()) {
     const nextDocument = {
         fileName: getDocumentFileName(documentState.filePath),

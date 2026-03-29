@@ -1,12 +1,14 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
+  getAppShortcutAction,
   getReaderShortcutAction,
   isInteractiveElement,
   splitIntoParagraphs,
   splitParagraphIntoSpeechChunks
 } from "./readerControls";
 import {
+  buildDocumentOpenFailureMessage,
   clampParagraphIndex,
   clampReadingSpeed,
   createLoadedDocumentState,
@@ -76,7 +78,7 @@ type OpenDocumentResult =
   | {
       canceled: false;
       error: string;
-      filePath?: undefined;
+      filePath?: string | undefined;
       text?: undefined;
       fileType?: undefined;
     };
@@ -182,7 +184,7 @@ function ReaderScreen(props: {
 }) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
   const [playbackMessage, setPlaybackMessage] = useState(
-    "Load a .txt or text-based .pdf file to start playback."
+    "Load a .txt or .pdf file to start playback."
   );
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const paragraphRefs = useRef<Array<HTMLParagraphElement | null>>([]);
@@ -376,7 +378,7 @@ function ReaderScreen(props: {
     setPlaybackMessage(
       props.documentState.text
         ? "Text is ready to play."
-        : "Load a .txt or text-based .pdf file to start playback."
+        : "Load a .txt or .pdf file to start playback."
     );
   }, [props.documentState.text]);
 
@@ -414,7 +416,7 @@ function ReaderScreen(props: {
   function handlePlay() {
     if (!props.documentState.text?.trim()) {
       setPlaybackState("idle");
-      setPlaybackMessage("Load a .txt or text-based .pdf file before starting playback.");
+      setPlaybackMessage("Load a .txt or .pdf file before starting playback.");
       return;
     }
 
@@ -538,9 +540,6 @@ function ReaderScreen(props: {
       event.preventDefault();
 
       switch (action) {
-        case "open":
-          void handleOpenFile();
-          return;
         case "togglePlayPause":
           if (playbackStateRef.current === "playing") {
             handlePause();
@@ -671,10 +670,10 @@ function ReaderScreen(props: {
         ) : (
           <div className="reader-empty-state">
             <p className="reader-empty-eyebrow">Ready to read</p>
-            <p className="empty-state">Open a readable `.txt` or text-based `.pdf` document to begin.</p>
+            <p className="empty-state">Open a readable `.txt` or `.pdf` document to begin.</p>
             <p className="hint">Use `Open file` above or press `Ctrl+O`.</p>
             <p className="hint reader-empty-shortcuts">
-              Playback shortcuts remain available: `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, and `Alt+Down`.
+              Reader shortcuts: `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, and `Alt+Down`.
             </p>
           </div>
         )}
@@ -751,8 +750,8 @@ function ReaderScreen(props: {
                 : "Position: no document loaded."}
             </p>
             <p className="hint reader-shortcuts-note">
-              Shortcuts: Ctrl+O open file, Space play or pause, S stop, J and K move, R repeat, Alt+Up or Alt+Down
-              speed.
+              Shortcuts: Ctrl+O open file anywhere in the app. In Reader, Space play or pause, S stop, J and K
+              move, R repeat, Alt+Up or Alt+Down speed.
             </p>
           </div>
         </div>
@@ -835,6 +834,28 @@ export function App() {
   const hasAttemptedStartupRestoreRef = useRef(false);
   const currentScreen = screens.find((screen) => screen.id === activeScreen)!;
 
+  useEffect(() => {
+    function handleAppKeydown(event: KeyboardEvent) {
+      const action = getAppShortcutAction(event);
+
+      if (!action) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (action === "openDocument") {
+        void loadDocument({ navigateToReader: true });
+      }
+    }
+
+    window.addEventListener("keydown", handleAppKeydown);
+
+    return () => {
+      window.removeEventListener("keydown", handleAppKeydown);
+    };
+  }, []);
+
   async function loadDocument(options?: {
     filePath?: string;
     navigateToReader?: boolean;
@@ -878,7 +899,11 @@ export function App() {
         clearUnavailableLastOpenedPath();
         setDocumentState((current) => ({
           ...current,
-          error: result.error,
+          error: buildDocumentOpenFailureMessage({
+            attemptedFilePath: result.filePath ?? options?.filePath,
+            currentFilePath: current.filePath,
+            reason: result.error
+          }),
           isLoading: false
         }));
         return;
@@ -888,7 +913,10 @@ export function App() {
         clearUnavailableLastOpenedPath();
         setDocumentState((current) => ({
           ...current,
-          error: "Phronon could not open the selected file.",
+          error: buildDocumentOpenFailureMessage({
+            attemptedFilePath: options?.filePath,
+            currentFilePath: current.filePath
+          }),
           isLoading: false
         }));
         return;
@@ -907,7 +935,10 @@ export function App() {
       clearUnavailableLastOpenedPath();
       setDocumentState((current) => ({
         ...current,
-        error: "Phronon could not open the selected file.",
+        error: buildDocumentOpenFailureMessage({
+          attemptedFilePath: options?.filePath,
+          currentFilePath: current.filePath
+        }),
         isLoading: false
       }));
     }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  getAppShortcutAction,
   getReaderShortcutAction,
   splitIntoParagraphs,
   splitParagraphIntoSpeechChunks
@@ -25,6 +26,17 @@ function runTests() {
   ]);
 
   assert.equal(
+    getAppShortcutAction({
+      key: "o",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "openDocument"
+  );
+
+  assert.equal(
     getReaderShortcutAction({
       key: "o",
       ctrlKey: true,
@@ -32,7 +44,7 @@ function runTests() {
       altKey: false,
       shiftKey: false
     }),
-    "open"
+    null
   );
 
   assert.equal(
