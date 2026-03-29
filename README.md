@@ -73,6 +73,35 @@ From the repository root:
 npm run build
 ```
 
+## Build Windows releases
+Phronon now supports two Windows release outputs without changing the app itself:
+- an unpacked portable app folder
+- a standard Windows installer
+
+From the repository root:
+
+```bash
+npm run release:win
+```
+
+This creates the unpacked Windows app folder in `release/win-unpacked/`.
+
+To build the Windows installer:
+
+```bash
+npm run release:win:installer
+```
+
+This creates an installer executable in `release-installer/`.
+
+To build both outputs in one step:
+
+```bash
+npm run release:win:all
+```
+
+For full release notes and testing steps, see [docs/windows-release.md](./docs/windows-release.md).
+
 ## Current scope (v0.1)
 - Project scaffold
 - Basic Electron window
@@ -86,12 +115,20 @@ npm run build
 The Reader screen now includes an `Open .txt or .pdf file` action that opens the native file picker, reads the selected plain text file through Electron, and sends PDF files through the local Python backend for text extraction. The extracted text is displayed in the existing reader area so the current playback controls and keyboard shortcuts continue to work. If no file is loaded, the screen explains what to do next. If loading fails, the app shows a clear error message instead of failing silently.
 
 PDF support stays intentionally simple in this first step:
-- Text-based PDFs still use the original direct text extraction path.
-- If direct PDF extraction returns little or no usable text, the backend now tries a local OCR fallback for scanned or image-only PDFs.
+- Text-based PDFs are now extracted directly inside the desktop app, so normal PDF reading no longer depends on Python or pip packages.
+- If direct PDF extraction returns little or no usable text, Phronon then tries the optional local OCR fallback for scanned or image-only PDFs.
 - OCR output then goes through a small local cleanup pass that normalizes whitespace, trims simple junk lines, and joins obvious wrapped lines without changing the direct text-PDF path.
 - If OCR dependencies are missing or OCR still cannot recover enough readable text, Phronon shows a clear message instead of failing silently.
 
 When Phronon is opening a PDF, the loading status now warns that scanned PDFs can take longer because local OCR may need to run.
+
+In the packaged Windows release:
+- TXT reading works immediately.
+- Standard text-based PDF reading works immediately and is bundled into the app.
+- OCR for scanned PDFs also needs `pytesseract`, `pypdfium2`, `Pillow`, and a local Tesseract OCR installation on the system path.
+- Arabic OCR works best when the local Tesseract installation also includes Arabic language data, because Phronon defaults to `eng+ara` OCR languages.
+- Arabic text-to-speech depends on the Windows device reporting at least one Arabic-capable voice. If it does not, playback still works, but Arabic pronunciation may sound incorrect.
+- On first launch, the welcome panel announces what this device is ready for, and Settings now includes a diagnostics section for core app readiness, standard PDF support, OCR, Arabic OCR, and Arabic TTS.
 
 ## Reader text-to-speech playback
 The Reader screen now supports local text-to-speech playback for the currently loaded `.txt` or extracted `.pdf` content using the built-in speech synthesis available in the Electron renderer. `Play` starts or resumes reading from the current paragraph, `Pause` pauses the current speech, `Stop` cancels it, and the reading speed slider adjusts the playback rate for upcoming speech. If no text is loaded, the app announces a clear status message instead of failing silently.

@@ -13,6 +13,8 @@
     "src/readerControls.test.ts",
     "src/documentWorkflow.ts",
     "src/documentWorkflow.test.ts",
+    "src/runtimeDiagnostics.ts",
+    "src/runtimeDiagnostics.test.ts",
     "src/speechVoices.ts",
     "src/speechVoices.test.ts",
     "src/voiceCommands.ts",

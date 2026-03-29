@@ -54,6 +54,7 @@ import {
   getVoiceRecognitionConstructor,
   type VoiceReaderCommand
 } from "./voiceCommands";
+import { buildRuntimeDiagnosticsItems, type RuntimeSupportStatus } from "./runtimeDiagnostics";
 
 type ScreenId = "home" | "reader" | "settings";
 
@@ -129,6 +130,7 @@ type ActiveDocumentLoad = {
 type WelcomePanelProps = {
   onOpenDocument: () => Promise<void>;
   onDismiss: () => void;
+  runtimeSupportStatus: RuntimeSupportStatus | null;
 };
 
 const screens: Screen[] = [
@@ -207,9 +209,10 @@ function createActiveDocumentLoad(requestId: number, options?: LoadDocumentOptio
 function WelcomePanel(props: WelcomePanelProps) {
   const titleId = useId();
   const tipsId = useId();
+  const setupId = useId();
 
   return (
-    <section className="welcome-panel" aria-labelledby={titleId} aria-describedby={tipsId}>
+    <section className="welcome-panel" aria-labelledby={titleId} aria-describedby={`${setupId} ${tipsId}`}>
       <div className="welcome-panel-header">
         <div>
           <p className="panel-kicker">Welcome</p>
@@ -222,6 +225,11 @@ function WelcomePanel(props: WelcomePanelProps) {
       <p className="welcome-panel-text">
         The first useful step is to open a TXT or PDF file. After that, move to Reader and press Play or Space to
         start playback.
+      </p>
+      <p id={setupId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+        {props.runtimeSupportStatus
+          ? props.runtimeSupportStatus.message
+          : "Checking local PDF and OCR support for this device."}
       </p>
       <div className="welcome-panel-actions">
         <button type="button" className="primary-button" onClick={() => void props.onOpenDocument()}>
@@ -1260,6 +1268,7 @@ function SettingsScreen(props: {
   preferredVoiceId: string | null;
   onPreferredVoiceIdChange: (nextVoiceId: string | null) => void;
   voicesInitialized: boolean;
+  runtimeSupportStatus: RuntimeSupportStatus | null;
 }) {
   const settingsTitleId = useId();
   const languageId = useId();
@@ -1276,6 +1285,11 @@ function SettingsScreen(props: {
   const voiceFallbackId = useId();
   const voiceListId = useId();
   const hasArabicVoice = findArabicVoice(props.availableVoices) !== null;
+  const runtimeDiagnostics = buildRuntimeDiagnosticsItems({
+    runtimeSupportStatus: props.runtimeSupportStatus,
+    voicesInitialized: props.voicesInitialized,
+    hasArabicTtsVoice: hasArabicVoice
+  });
   const preferredVoice = findVoiceById(props.availableVoices, props.preferredVoiceId);
   const voiceSummary = buildVoiceDiagnosticsSummary(props.availableVoices, props.voicesInitialized);
   const fallbackVoice = chooseSpeechVoice({
@@ -1398,6 +1412,27 @@ function SettingsScreen(props: {
           </p>
         </section>
 
+        <section className="panel-section" aria-labelledby="settings-readiness-title">
+          <div className="panel-section-header">
+            <p className="panel-kicker">Readiness</p>
+            <h3 id="settings-readiness-title">Setup diagnostics</h3>
+            <p>Review what this device can already do and what still needs optional local setup.</p>
+          </div>
+          <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+            {props.runtimeSupportStatus?.message ?? "Checking what is ready on this device."}
+          </p>
+          <ul className="simple-list voice-diagnostics-list" aria-label="Runtime readiness diagnostics">
+            {runtimeDiagnostics.map((item) => (
+              <li key={item.id} className="voice-diagnostics-item">
+                <span className="voice-diagnostics-name">
+                  {item.label}: {item.ready ? "Ready" : "Missing"}
+                </span>
+                <span className="voice-diagnostics-meta">{item.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
         <section className="panel-section" aria-labelledby="settings-voice-picker-title" aria-describedby={voiceSummaryId}>
           <div className="panel-section-header">
             <p className="panel-kicker">Voices</p>
@@ -1512,6 +1547,7 @@ export function App() {
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voicesInitialized, setVoicesInitialized] = useState(false);
   const [activeLoad, setActiveLoad] = useState<ActiveDocumentLoad | null>(null);
+  const [runtimeSupportStatus, setRuntimeSupportStatus] = useState<RuntimeSupportStatus | null>(null);
   const [liveMessage, setLiveMessage] = useState<LiveMessage>({
     id: 0,
     text: ""
@@ -1675,6 +1711,39 @@ export function App() {
 
     return () => {
       window.speechSynthesis.removeEventListener("voiceschanged", updateAvailableVoices);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isSubscribed = true;
+
+    void window.phronon
+      .getRuntimeSupportStatus()
+      .then((status) => {
+        if (!isSubscribed) {
+          return;
+        }
+
+        setRuntimeSupportStatus(status);
+      })
+      .catch(() => {
+        if (!isSubscribed) {
+          return;
+        }
+
+        setRuntimeSupportStatus({
+          isPackaged: false,
+          coreAppReady: true,
+          pdfSupportAvailable: true,
+          ocrSupportAvailable: false,
+          arabicOcrSupportAvailable: false,
+          message:
+            "Phronon could not verify optional OCR support yet. Core app and standard PDF reading should still work in this release."
+        });
+      });
+
+    return () => {
+      isSubscribed = false;
     };
   }, []);
 
@@ -1940,6 +2009,7 @@ export function App() {
             <WelcomePanel
               onOpenDocument={() => loadDocument({ navigateToReader: true, origin: "filePicker" })}
               onDismiss={dismissOnboarding}
+              runtimeSupportStatus={runtimeSupportStatus}
             />
           ) : null}
           {activeScreen === "home" && (
@@ -1985,6 +2055,7 @@ export function App() {
               preferredVoiceId={preferredVoiceId}
               onPreferredVoiceIdChange={setPreferredVoiceId}
               voicesInitialized={voicesInitialized}
+              runtimeSupportStatus={runtimeSupportStatus}
             />
           )}
         </main>

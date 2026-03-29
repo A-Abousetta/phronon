@@ -20,6 +20,14 @@ type PhrononApi = {
   appName: string;
   openReaderDocument: () => Promise<OpenReaderDocumentResult>;
   openDocumentAtPath: (filePath: string) => Promise<OpenReaderDocumentResult>;
+  getRuntimeSupportStatus: () => Promise<{
+    isPackaged: boolean;
+    coreAppReady: boolean;
+    pdfSupportAvailable: boolean;
+    ocrSupportAvailable: boolean;
+    arabicOcrSupportAvailable: boolean;
+    message: string;
+  }>;
 };
 
 declare global {

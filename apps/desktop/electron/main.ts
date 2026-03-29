@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { execFile } from "node:child_process";
+import { appendFile, mkdir } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -9,11 +10,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(__dirname, "../../..");
-const backendSourcePath = path.join(projectRoot, "backend", "src");
-const windowsProjectPython = path.join(projectRoot, ".venv", "Scripts", "python.exe");
-const projectPython = path.join(projectRoot, ".venv", "bin", "python");
 const desktopPublicPath = path.join(projectRoot, "apps", "desktop", "public");
-const desktopIconPath = path.join(desktopPublicPath, "icons", "phronon.ico");
+
+type PythonRuntime = {
+  command: string;
+  args: string[];
+};
 
 type PdfExtractionFailureReason =
   | "backend_invocation_failed"
@@ -44,8 +46,94 @@ type BackendJsonResponse = {
   error?: string;
 };
 
+type RuntimeSupportStatus = {
+  isPackaged: boolean;
+  coreAppReady: boolean;
+  pdfSupportAvailable: boolean;
+  ocrSupportAvailable: boolean;
+  arabicOcrSupportAvailable: boolean;
+  message: string;
+};
+
+type OcrProbeStatus = {
+  pythonAvailable: boolean;
+  ocrPackagesAvailable: boolean;
+  tesseractAvailable: boolean;
+  arabicLanguageAvailable: boolean;
+};
+
+const MIN_EXTRACTED_WORDS = 8;
+const MIN_EXTRACTED_CHARACTERS = 40;
+
 function isDevMode() {
   return !app.isPackaged || Boolean(process.env.PHRONON_RENDERER_URL);
+}
+
+function getBackendSourcePath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "backend", "src")
+    : path.join(projectRoot, "backend", "src");
+}
+
+function getDesktopIconPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "assets", "phronon.ico")
+    : path.join(desktopPublicPath, "icons", "phronon.ico");
+}
+
+function getRuntimeWorkingDirectory() {
+  return app.isPackaged ? process.resourcesPath : projectRoot;
+}
+
+function getPythonCandidates(): PythonRuntime[] {
+  if (process.env.PHRONON_PYTHON) {
+    return [
+      {
+        command: process.env.PHRONON_PYTHON,
+        args: []
+      }
+    ];
+  }
+
+  if (!app.isPackaged) {
+    return process.platform === "win32"
+      ? [
+          {
+            command: path.join(projectRoot, ".venv", "Scripts", "python.exe"),
+            args: []
+          }
+        ]
+      : [
+          {
+            command: path.join(projectRoot, ".venv", "bin", "python"),
+            args: []
+          }
+        ];
+  }
+
+  if (process.platform === "win32") {
+    return [
+      {
+        command: "py",
+        args: ["-3.11"]
+      },
+      {
+        command: "python",
+        args: []
+      }
+    ];
+  }
+
+  return [
+    {
+      command: "python3",
+      args: []
+    },
+    {
+      command: "python",
+      args: []
+    }
+  ];
 }
 
 function logPdfExtraction(message: string, details?: Record<string, unknown>) {
@@ -74,16 +162,26 @@ function logPdfExtractionError(message: string, details?: Record<string, unknown
   console.error("[phronon:pdf]", message);
 }
 
-function resolvePythonCommand() {
-  if (process.env.PHRONON_PYTHON) {
-    return process.env.PHRONON_PYTHON;
+async function logAppEvent(message: string, details?: Record<string, unknown>) {
+  const timestamp = new Date().toISOString();
+  const detailText = details ? ` ${JSON.stringify(details)}` : "";
+  const line = `${timestamp} ${message}${detailText}`;
+
+  console.log(`[phronon:app] ${line}`);
+
+  if (isDevMode()) {
+    return;
   }
 
-  if (process.platform === "win32") {
-    return windowsProjectPython;
+  try {
+    const logDirectory = path.join(app.getPath("userData"), "logs");
+    await mkdir(logDirectory, {
+      recursive: true
+    });
+    await appendFile(path.join(logDirectory, "main.log"), `${line}\n`, "utf8");
+  } catch {
+    // Ignore logging failures so startup stays reliable.
   }
-
-  return projectPython;
 }
 
 function normalizeBackendReason(reason: string | undefined): PdfExtractionFailureReason {
@@ -130,14 +228,61 @@ function parseBackendOutput(stdout: string | undefined): PdfExtractionResult | n
   return null;
 }
 
+function hasUsablePdfText(text: string) {
+  const words = text.match(/\w+/gu) ?? [];
+  const compactCharacters = text.replace(/\s+/gu, "");
+  return words.length >= MIN_EXTRACTED_WORDS && compactCharacters.length >= MIN_EXTRACTED_CHARACTERS;
+}
+
+async function extractPdfTextWithBundledRenderer(filePath: string) {
+  const pdfJs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const fileBuffer = await readFile(filePath);
+  const loadingTask = pdfJs.getDocument({
+    data: new Uint8Array(fileBuffer),
+    useWorkerFetch: false,
+    isEvalSupported: false
+  });
+  const document = await loadingTask.promise;
+  const extractedPages: string[] = [];
+
+  try {
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+
+      try {
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item) => ("str" in item && typeof item.str === "string" ? item.str : ""))
+          .join(" ")
+          .replace(/\s+/gu, " ")
+          .trim();
+
+        if (pageText) {
+          extractedPages.push(pageText);
+        }
+      } finally {
+        page.cleanup();
+      }
+    }
+  } finally {
+    await loadingTask.destroy();
+  }
+
+  return extractedPages.join("\n\n").trim();
+}
+
 function createWindow() {
+  const rendererIndexPath = path.join(__dirname, "../dist/index.html");
   const window = new BrowserWindow({
     width: 1180,
     height: 780,
     minWidth: 960,
     minHeight: 640,
+    show: false,
     autoHideMenuBar: true,
-    icon: desktopIconPath,
+    title: "Phronon",
+    backgroundColor: "#f4f1eb",
+    icon: getDesktopIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -147,34 +292,242 @@ function createWindow() {
 
   const rendererUrl = process.env.PHRONON_RENDERER_URL;
 
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+    void logAppEvent("Renderer did-fail-load.", {
+      errorCode,
+      errorDescription,
+      validatedUrl,
+      isMainFrame,
+      rendererUrl,
+      rendererIndexPath
+    });
+  });
+
+  window.webContents.on("did-finish-load", () => {
+    void logAppEvent("Renderer did-finish-load.", {
+      currentUrl: window.webContents.getURL(),
+      rendererUrl,
+      rendererIndexPath
+    });
+  });
+
+  window.webContents.on("render-process-gone", (_event, details) => {
+    void logAppEvent("Renderer process exited unexpectedly.", {
+      reason: details.reason,
+      exitCode: details.exitCode
+    });
+  });
+
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level >= 2) {
+      void logAppEvent("Renderer console message.", {
+        level,
+        message,
+        line,
+        sourceId
+      });
+    }
+  });
+
   if (rendererUrl) {
+    void logAppEvent("Loading renderer from development server.", {
+      rendererUrl
+    });
     void window.loadURL(rendererUrl);
   } else {
-    void window.loadFile(path.join(__dirname, "../dist/index.html"));
+    void logAppEvent("Loading renderer from packaged file.", {
+      rendererIndexPath
+    });
+    void window.loadFile(rendererIndexPath);
+  }
+
+  window.once("ready-to-show", () => {
+    window.show();
+    window.focus();
+  });
+
+  return window;
+}
+
+async function runPythonCommand(
+  runtime: PythonRuntime,
+  args: string[],
+  options: {
+    includeBackendSourcePath: boolean;
+  }
+) {
+  const backendSourcePath = getBackendSourcePath();
+
+  return execFileAsync(runtime.command, [...runtime.args, ...args], {
+    cwd: getRuntimeWorkingDirectory(),
+    env: {
+      ...process.env,
+      PYTHONPATH: options.includeBackendSourcePath
+        ? process.env.PYTHONPATH
+          ? `${backendSourcePath}${path.delimiter}${process.env.PYTHONPATH}`
+          : backendSourcePath
+        : process.env.PYTHONPATH
+    }
+  });
+}
+
+async function resolvePythonRuntime() {
+  for (const candidate of getPythonCandidates()) {
+    try {
+      await runPythonCommand(candidate, ["--version"], {
+        includeBackendSourcePath: false
+      });
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function probeOptionalOcrSupport(): Promise<OcrProbeStatus> {
+  const runtime = await resolvePythonRuntime();
+
+  if (!runtime) {
+    return {
+      pythonAvailable: false,
+      ocrPackagesAvailable: false,
+      tesseractAvailable: false,
+      arabicLanguageAvailable: false
+    };
+  }
+
+  try {
+    const { stdout } = await runPythonCommand(
+      runtime,
+      [
+        "-c",
+        [
+          "import importlib.util, json",
+          "status = {",
+          "  'pythonAvailable': True,",
+          "  'ocrPackagesAvailable': all(importlib.util.find_spec(module) is not None for module in ('pytesseract', 'pypdfium2', 'PIL')),",
+          "  'tesseractAvailable': False,",
+          "  'arabicLanguageAvailable': False",
+          "}",
+          "if status['ocrPackagesAvailable']:",
+          "  try:",
+          "    import pytesseract",
+          "    languages = set(pytesseract.get_languages(config='') or [])",
+          "    status['tesseractAvailable'] = True",
+          "    status['arabicLanguageAvailable'] = 'ara' in languages",
+          "  except Exception:",
+          "    status['tesseractAvailable'] = False",
+          "    status['arabicLanguageAvailable'] = False",
+          "print(json.dumps(status))"
+        ].join("; ")
+      ],
+      {
+        includeBackendSourcePath: false
+      }
+    );
+    return JSON.parse(stdout.trim()) as OcrProbeStatus;
+  } catch {
+    return {
+      pythonAvailable: true,
+      ocrPackagesAvailable: false,
+      tesseractAvailable: false,
+      arabicLanguageAvailable: false
+    };
   }
 }
 
+async function collectRuntimeSupportStatus(): Promise<RuntimeSupportStatus> {
+  const ocrProbe = await probeOptionalOcrSupport();
+  const ocrSupportAvailable = ocrProbe.pythonAvailable && ocrProbe.ocrPackagesAvailable && ocrProbe.tesseractAvailable;
+  const arabicOcrSupportAvailable = ocrSupportAvailable && ocrProbe.arabicLanguageAvailable;
+
+  if (arabicOcrSupportAvailable) {
+    return {
+      isPackaged: app.isPackaged,
+      coreAppReady: true,
+      pdfSupportAvailable: true,
+      ocrSupportAvailable: true,
+      arabicOcrSupportAvailable: true,
+      message: "Core app, standard PDF reading, OCR, and Arabic OCR are ready on this device."
+    };
+  }
+
+  if (ocrSupportAvailable) {
+    return {
+      isPackaged: app.isPackaged,
+      coreAppReady: true,
+      pdfSupportAvailable: true,
+      ocrSupportAvailable: true,
+      arabicOcrSupportAvailable: false,
+      message: "Core app, standard PDF reading, and OCR are ready. Arabic OCR still needs Arabic Tesseract language data."
+    };
+  }
+
+  return {
+    isPackaged: app.isPackaged,
+    coreAppReady: true,
+    pdfSupportAvailable: true,
+    ocrSupportAvailable: false,
+    arabicOcrSupportAvailable: false,
+    message:
+      "Core app and standard PDF reading are ready in this release. OCR for scanned PDFs is optional and is not set up on this device yet."
+  };
+}
+
 async function extractPdfText(filePath: string): Promise<PdfExtractionResult> {
-  const pythonCommand = resolvePythonCommand();
-  const backendArgs = ["-m", "phronon_backend", "extract-text", "--file", filePath];
+  try {
+    const directPdfText = await extractPdfTextWithBundledRenderer(filePath);
+
+    if (hasUsablePdfText(directPdfText)) {
+      return {
+        ok: true,
+        text: directPdfText
+      };
+    }
+
+    logPdfExtraction("Bundled PDF extraction did not find enough readable text. Trying OCR fallback.", {
+      filePath
+    });
+  } catch (error) {
+    logPdfExtractionError("Bundled PDF extraction failed.", {
+      filePath,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      ok: false,
+      reason: "read_error",
+      error: "Phronon could not read that PDF. Please choose a readable PDF and try again."
+    };
+  }
+
+  const runtime = await resolvePythonRuntime();
+
+  if (!runtime) {
+    return {
+      ok: false,
+      reason: "backend_invocation_failed",
+      error: app.isPackaged
+        ? "Phronon can already open standard PDFs in this release, but scanned PDFs need optional OCR tools. Install Python 3.11 or newer, pytesseract, pypdfium2, Pillow, and Tesseract OCR if you want OCR fallback."
+        : "Phronon could not find the local Python OCR backend. Standard PDFs still work, but scanned PDFs need the local OCR setup."
+    };
+  }
+
+  const backendArgs = ["-m", "phronon_backend", "ocr-extract-text", "--file", filePath];
 
   logPdfExtraction("Invoking backend for PDF extraction.", {
-    pythonCommand,
+    pythonCommand: runtime.command,
+    pythonArgs: runtime.args,
     backendArgs,
     filePath
   });
 
   try {
-    const { stdout, stderr } = await execFileAsync(pythonCommand, backendArgs, {
-      cwd: projectRoot,
-      env: {
-        ...process.env,
-        PYTHONPATH: process.env.PYTHONPATH
-          ? `${backendSourcePath}${path.delimiter}${process.env.PYTHONPATH}`
-          : backendSourcePath
-      }
+    const { stdout, stderr } = await runPythonCommand(runtime, backendArgs, {
+      includeBackendSourcePath: true
     });
-
     const parsedResult = parseBackendOutput(stdout);
 
     if (parsedResult) {
@@ -214,7 +567,8 @@ async function extractPdfText(filePath: string): Promise<PdfExtractionResult> {
     }
 
     logPdfExtractionError("Failed to invoke backend for PDF extraction.", {
-      pythonCommand,
+      pythonCommand: runtime.command,
+      pythonArgs: runtime.args,
       filePath,
       errorMessage: error instanceof Error ? error.message : String(error),
       stdout:
@@ -230,8 +584,9 @@ async function extractPdfText(filePath: string): Promise<PdfExtractionResult> {
     return {
       ok: false,
       reason: "backend_invocation_failed",
-      error:
-        "Phronon could not extract text from that PDF. Please make sure the local Python backend is installed and try again."
+      error: app.isPackaged
+        ? "Phronon could not start optional OCR for this PDF. Standard PDFs still work, but scanned PDFs need Python 3.11 or newer plus pytesseract, pypdfium2, Pillow, and Tesseract OCR."
+        : "Phronon could not start optional OCR for that PDF. Please make sure the local OCR backend is installed and try again."
     };
   }
 
@@ -333,16 +688,43 @@ ipcMain.handle("reader:open-document", async () => {
 });
 
 ipcMain.handle("reader:open-document-at-path", async (_event, filePath: string) => openDocumentFromPath(filePath));
+ipcMain.handle("app:get-runtime-support-status", () => collectRuntimeSupportStatus());
 
-app.whenReady().then(() => {
-  createWindow();
+if (process.platform === "win32") {
+  app.setAppUserModelId("org.phronon.desktop");
+}
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const existingWindow = BrowserWindow.getAllWindows()[0];
+
+    if (!existingWindow) {
       createWindow();
+      return;
     }
+
+    if (existingWindow.isMinimized()) {
+      existingWindow.restore();
+    }
+
+    existingWindow.show();
+    existingWindow.focus();
   });
-});
+
+  app.whenReady().then(() => {
+    createWindow();
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
