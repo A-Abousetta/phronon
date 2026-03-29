@@ -92,13 +92,15 @@ PDF support stays intentionally simple in this first step:
 ## Reader text-to-speech playback
 The Reader screen now supports local text-to-speech playback for the currently loaded `.txt` or extracted `.pdf` content using the built-in speech synthesis available in the Electron renderer. `Play` starts or resumes reading from the current paragraph, `Pause` pauses the current speech, `Stop` cancels it, and the reading speed slider adjusts the playback rate for upcoming speech. If no text is loaded, the app announces a clear status message instead of failing silently.
 
+Phronon now checks the speech synthesis voices reported by the renderer and uses simple script detection to choose a voice. When the current text chunk contains Arabic script, Automatic mode prefers an Arabic-capable voice when one is available. For English or other non-Arabic text, Phronon keeps using the default voice. If the device does not report a suitable Arabic voice, playback still works with the default voice and the Reader shows a clear status message explaining that Arabic pronunciation may sound incorrect.
+
 When a document is loaded, Phronon also splits the extracted text into readable paragraphs by looking for blank lines between text blocks. The Reader tracks a current paragraph, shows its position, highlights it in the document view, and can start speech from that paragraph onward.
 
 ## Reader keyboard shortcuts
 Phronon supports a shared keyboard-first document open flow across the app. `Ctrl+O` opens the document picker from Home, Reader, or Settings. Reader-only controls stay scoped to the Reader screen: `Space` starts, pauses, or resumes reading from the current paragraph, `S` stops playback, `J` moves to the next paragraph, `K` moves to the previous paragraph, `R` repeats only the current paragraph, and `Alt+Up` or `Alt+Down` adjust the reading speed. These Reader shortcuts intentionally stay inactive while a form control such as the reading speed slider or a button has focus so normal keyboard behavior is preserved.
 
 ## Reader persistence
-The desktop app now keeps a small local reader snapshot in the Electron renderer so study context survives restarts without any cloud service or new dependency. Phronon remembers the recent documents list, the current reading speed, the last opened document path, and the last active paragraph for that document. If opening a new document fails, Phronon keeps the current document and paragraph position in place and explains that the attempted file did not open.
+The desktop app now keeps a small local reader snapshot in the Electron renderer so study context survives restarts without any cloud service or new dependency. Phronon remembers the recent documents list, the current reading speed, the selected speech voice mode, the last opened document path, and the last active paragraph for that document. If opening a new document fails, Phronon keeps the current document and paragraph position in place and explains that the attempted file did not open.
 
 On launch, Phronon restores the recent documents list and reading speed immediately. If the last opened file can still be read, the app reopens it and restores the saved paragraph position. If the file has moved, been deleted, or cannot be reopened, Phronon fails softly by leaving the app usable and showing the normal loading error instead of blocking the interface.
 
@@ -122,9 +124,12 @@ On launch, Phronon restores the recent documents list and reading speed immediat
 17. Press `K` and confirm the current paragraph moves backward and the highlighted paragraph updates.
 18. Press `R` and confirm only the highlighted paragraph is read from its beginning.
 19. If local OCR dependencies are installed, open a scanned PDF or an image-only PDF and confirm Phronon extracts readable text through the same Reader view.
-20. If local OCR dependencies are not installed, open a scanned PDF or an image-only PDF and confirm Phronon shows a clear message explaining which local OCR tools are missing.
-21. Move focus to the reading speed slider and press `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, or `Alt+Down`; confirm the shortcut does not fire and the focused control keeps its normal behavior.
-22. While playback is active, change the reading speed slider or press `Alt+Up` or `Alt+Down` and confirm the status says the new speed will apply on the next paragraph without restarting the current paragraph immediately.
+20. Open a document containing Arabic text and confirm Phronon prefers an Arabic-capable voice when the system reports one.
+21. On a system without an Arabic speech voice, open Arabic text and confirm playback still starts while the Reader explains that Arabic playback may sound incorrect.
+22. Open `Settings`, switch `Speech voice mode` between `Automatic` and `Always use default voice`, and confirm the choice persists after restarting the app.
+23. If local OCR dependencies are not installed, open a scanned PDF or an image-only PDF and confirm Phronon shows a clear message explaining which local OCR tools are missing.
+24. Move focus to the reading speed slider and press `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, or `Alt+Down`; confirm the shortcut does not fire and the focused control keeps its normal behavior.
+25. While playback is active, change the reading speed slider or press `Alt+Up` or `Alt+Down` and confirm the status says the new speed will apply on the next paragraph without restarting the current paragraph immediately.
 23. Pause playback, change the reading speed, press `Play`, and confirm playback resumes from the current paragraph at the new speed.
 24. With no file loaded, press `Play`, `Space`, or `R` and confirm the app shows a clear status message.
 25. Open a document, move to a later paragraph, change the reading speed, restart the app, and confirm the recent list and reading speed are restored.

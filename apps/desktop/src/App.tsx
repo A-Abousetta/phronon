@@ -21,6 +21,11 @@ import {
   upsertRecentDocument,
   writeReaderPersistenceState
 } from "./documentWorkflow";
+import {
+  chooseSpeechVoice,
+  findArabicVoice,
+  type SpeechVoicePreference
+} from "./speechVoices";
 
 type ScreenId = "home" | "reader" | "settings";
 
@@ -179,8 +184,11 @@ function ReaderScreen(props: {
   currentParagraphIndex: number;
   onCurrentParagraphIndexChange: (nextIndex: number) => void;
   onOpenDocument: () => Promise<void>;
+  availableVoices: SpeechSynthesisVoice[];
+  voicesInitialized: boolean;
   playbackRate: number;
   onPlaybackRateChange: (nextRate: number) => void;
+  speechVoicePreference: SpeechVoicePreference;
 }) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
   const [playbackMessage, setPlaybackMessage] = useState(
@@ -253,6 +261,20 @@ function ReaderScreen(props: {
     }
 
     const utterance = new SpeechSynthesisUtterance(currentChunk);
+    const voiceChoice = chooseSpeechVoice({
+      voices: props.availableVoices,
+      text: currentChunk,
+      preference: props.speechVoicePreference
+    });
+
+    if (voiceChoice.voice) {
+      utterance.voice = voiceChoice.voice;
+
+      if (voiceChoice.voice.lang.trim()) {
+        utterance.lang = voiceChoice.voice.lang;
+      }
+    }
+
     utterance.rate = playbackRateRef.current;
     utterance.onstart = () => {
       if (sessionId !== playbackSessionRef.current) {
@@ -585,6 +607,13 @@ function ReaderScreen(props: {
 
   const hasText = Boolean(props.documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
+  const documentVoiceChoice = chooseSpeechVoice({
+    voices: props.availableVoices,
+    text: props.documentState.text,
+    preference: props.speechVoicePreference
+  });
+  const voiceStatusMessage =
+    !hasText || !speechSynthesisAvailable || !props.voicesInitialized ? null : documentVoiceChoice.warning;
   const speedValueId = useId();
   const statusToneClass = props.documentState.error || !speechSynthesisAvailable ? "status-message error-text" : "status-message";
   const playbackStatusLabel = !props.documentState.text
@@ -749,6 +778,11 @@ function ReaderScreen(props: {
                 ? `Position: paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
                 : "Position: no document loaded."}
             </p>
+            {voiceStatusMessage ? (
+              <p className="status-message error-text compact-status" role="status" aria-live="polite" aria-atomic="true">
+                {voiceStatusMessage}
+              </p>
+            ) : null}
             <p className="hint reader-shortcuts-note">
               Shortcuts: Ctrl+O open file anywhere in the app. In Reader, Space play or pause, S stop, J and K
               move, R repeat, Alt+Up or Alt+Down speed.
@@ -760,9 +794,23 @@ function ReaderScreen(props: {
   );
 }
 
-function SettingsScreen() {
+function SettingsScreen(props: {
+  availableVoices: SpeechSynthesisVoice[];
+  speechVoicePreference: SpeechVoicePreference;
+  onSpeechVoicePreferenceChange: (nextPreference: SpeechVoicePreference) => void;
+  voicesInitialized: boolean;
+}) {
   const languageId = useId();
   const startupId = useId();
+  const speechVoiceModeId = useId();
+  const hasArabicVoice = findArabicVoice(props.availableVoices) !== null;
+  const voiceSummary = !props.voicesInitialized
+    ? "Checking available speech voices on this device."
+    : props.availableVoices.length === 0
+      ? "No speech voices were reported by the system yet."
+      : hasArabicVoice
+        ? `${props.availableVoices.length} speech voices detected, including Arabic support.`
+        : `${props.availableVoices.length} speech voices detected. No Arabic voice was reported.`;
 
   return (
     <section className="page-workspace" aria-label="Settings workspace">
@@ -800,7 +848,27 @@ function SettingsScreen() {
                 <option value="settings">Settings</option>
               </select>
             </label>
+
+            <label className="field" htmlFor={speechVoiceModeId}>
+              <span>Speech voice mode</span>
+              <select
+                id={speechVoiceModeId}
+                value={props.speechVoicePreference}
+                onChange={(event) =>
+                  props.onSpeechVoicePreferenceChange(
+                    event.target.value === "default" ? "default" : "automatic"
+                  )
+                }
+              >
+                <option value="automatic">Automatic</option>
+                <option value="default">Always use default voice</option>
+              </select>
+            </label>
           </div>
+          <p className="status-message compact-status">{voiceSummary}</p>
+          <p className="hint">
+            Automatic mode prefers an Arabic-capable voice for Arabic script and keeps the default voice for other text.
+          </p>
         </section>
 
         <section className="panel-section" aria-labelledby="settings-accessibility-title">
@@ -830,9 +898,34 @@ export function App() {
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>(initialPersistenceState.recentDocuments);
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(initialPersistenceState.lastOpenedParagraphIndex);
   const [playbackRate, setPlaybackRate] = useState(initialPersistenceState.readingSpeed);
+  const [speechVoicePreference, setSpeechVoicePreference] = useState<SpeechVoicePreference>(
+    initialPersistenceState.speechVoicePreference
+  );
   const [lastOpenedDocumentPath, setLastOpenedDocumentPath] = useState<string | null>(initialPersistenceState.lastOpenedDocumentPath);
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voicesInitialized, setVoicesInitialized] = useState(false);
   const hasAttemptedStartupRestoreRef = useRef(false);
   const currentScreen = screens.find((screen) => screen.id === activeScreen)!;
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setVoicesInitialized(true);
+      return;
+    }
+
+    function updateAvailableVoices() {
+      const nextVoices = window.speechSynthesis.getVoices();
+      setAvailableVoices(nextVoices);
+      setVoicesInitialized(true);
+    }
+
+    updateAvailableVoices();
+    window.speechSynthesis.addEventListener("voiceschanged", updateAvailableVoices);
+
+    return () => {
+      window.speechSynthesis.removeEventListener("voiceschanged", updateAvailableVoices);
+    };
+  }, []);
 
   useEffect(() => {
     function handleAppKeydown(event: KeyboardEvent) {
@@ -948,11 +1041,20 @@ export function App() {
     writeReaderPersistenceState(typeof window === "undefined" ? undefined : window.localStorage, {
       recentDocuments,
       readingSpeed: clampReadingSpeed(playbackRate),
+      speechVoicePreference,
       lastOpenedDocumentPath,
       lastOpenedParagraphIndex:
         documentState.filePath && documentState.text ? clampParagraphIndex(currentParagraphIndex) : 0
     });
-  }, [currentParagraphIndex, documentState.filePath, documentState.text, lastOpenedDocumentPath, playbackRate, recentDocuments]);
+  }, [
+    currentParagraphIndex,
+    documentState.filePath,
+    documentState.text,
+    lastOpenedDocumentPath,
+    playbackRate,
+    recentDocuments,
+    speechVoicePreference
+  ]);
 
   useEffect(() => {
     if (hasAttemptedStartupRestoreRef.current) {
@@ -1020,11 +1122,21 @@ export function App() {
               currentParagraphIndex={currentParagraphIndex}
               onCurrentParagraphIndexChange={(nextIndex) => setCurrentParagraphIndex(clampParagraphIndex(nextIndex))}
               onOpenDocument={() => loadDocument()}
+              availableVoices={availableVoices}
+              voicesInitialized={voicesInitialized}
               playbackRate={playbackRate}
               onPlaybackRateChange={(nextRate) => setPlaybackRate(clampReadingSpeed(nextRate))}
+              speechVoicePreference={speechVoicePreference}
             />
           )}
-          {activeScreen === "settings" && <SettingsScreen />}
+          {activeScreen === "settings" && (
+            <SettingsScreen
+              availableVoices={availableVoices}
+              speechVoicePreference={speechVoicePreference}
+              onSpeechVoicePreferenceChange={setSpeechVoicePreference}
+              voicesInitialized={voicesInitialized}
+            />
+          )}
         </main>
       </div>
     </div>

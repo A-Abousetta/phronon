@@ -12,6 +12,8 @@
     "src/readerControls.ts",
     "src/readerControls.test.ts",
     "src/documentWorkflow.ts",
-    "src/documentWorkflow.test.ts"
+    "src/documentWorkflow.test.ts",
+    "src/speechVoices.ts",
+    "src/speechVoices.test.ts"
   ]
 }

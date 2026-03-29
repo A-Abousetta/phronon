@@ -1,3 +1,5 @@
+import type { SpeechVoicePreference } from "./speechVoices.js";
+
 export type ReaderDocumentState = {
   filePath: string | null;
   text: string | null;
@@ -16,6 +18,7 @@ export type RecentDocument = {
 export type ReaderPersistenceState = {
   recentDocuments: RecentDocument[];
   readingSpeed: number;
+  speechVoicePreference: SpeechVoicePreference;
   lastOpenedDocumentPath: string | null;
   lastOpenedParagraphIndex: number;
 };
@@ -36,6 +39,7 @@ export const emptyReaderDocumentState: ReaderDocumentState = {
 export const defaultReaderPersistenceState: ReaderPersistenceState = {
   recentDocuments: [],
   readingSpeed: DEFAULT_READING_SPEED,
+  speechVoicePreference: "automatic",
   lastOpenedDocumentPath: null,
   lastOpenedParagraphIndex: 0
 };
@@ -143,6 +147,8 @@ export function parseReaderPersistenceState(rawValue: string | null): ReaderPers
       readingSpeed: clampReadingSpeed(
         typeof parsed.readingSpeed === "number" ? parsed.readingSpeed : DEFAULT_READING_SPEED
       ),
+      speechVoicePreference:
+        parsed.speechVoicePreference === "default" ? "default" : "automatic",
       lastOpenedDocumentPath:
         typeof parsed.lastOpenedDocumentPath === "string" && parsed.lastOpenedDocumentPath.trim().length > 0
           ? parsed.lastOpenedDocumentPath

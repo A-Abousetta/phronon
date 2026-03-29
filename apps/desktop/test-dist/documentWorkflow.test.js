@@ -56,6 +56,7 @@ test("parseReaderPersistenceState returns safe defaults for invalid data", () =>
     assert.deepEqual(parseReaderPersistenceState("{not valid json"), {
         recentDocuments: [],
         readingSpeed: 1,
+        speechVoicePreference: "automatic",
         lastOpenedDocumentPath: null,
         lastOpenedParagraphIndex: 0
     });
@@ -75,6 +76,7 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
             }
         ],
         readingSpeed: 2.7,
+        speechVoicePreference: "default",
         lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
         lastOpenedParagraphIndex: 4.8
     }));
@@ -88,6 +90,7 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
             }
         ],
         readingSpeed: 2,
+        speechVoicePreference: "default",
         lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
         lastOpenedParagraphIndex: 4
     });
