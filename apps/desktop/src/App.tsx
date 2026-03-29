@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import {
   getAppShortcutAction,
@@ -21,9 +21,15 @@ import {
   emptyReaderDocumentState,
   getBookmarksForDocument,
   getDocumentFileName,
+  parseContrastMode,
+  parseInterfaceTextScale,
+  parseReaderTextScale,
   readReaderPersistenceState,
+  type ContrastMode,
+  type InterfaceTextScale,
   type ParagraphBookmark,
   type DocumentLoadOrigin,
+  type ReaderTextScale,
   type ReaderDocumentState,
   type RecentDocument,
   upsertParagraphBookmark,
@@ -145,6 +151,18 @@ const screens: Screen[] = [
     description: "Adjust language, reading voice placeholders, and interface defaults."
   }
 ];
+
+const interfaceTextScaleValueMap: Record<InterfaceTextScale, number> = {
+  default: 1,
+  large: 1.08,
+  largest: 1.16
+};
+
+const readerTextScaleValueMap: Record<ReaderTextScale, number> = {
+  default: 1,
+  large: 1.15,
+  largest: 1.3
+};
 
 function isOpenDocumentSuccessResult(result: OpenDocumentResult): result is OpenDocumentSuccessResult {
   return (
@@ -1230,6 +1248,12 @@ function ReaderScreen(props: {
 }
 
 function SettingsScreen(props: {
+  interfaceTextScale: InterfaceTextScale;
+  onInterfaceTextScaleChange: (nextScale: InterfaceTextScale) => void;
+  readerTextScale: ReaderTextScale;
+  onReaderTextScaleChange: (nextScale: ReaderTextScale) => void;
+  contrastMode: ContrastMode;
+  onContrastModeChange: (nextMode: ContrastMode) => void;
   availableVoices: SpeechSynthesisVoice[];
   speechVoicePreference: SpeechVoicePreference;
   onSpeechVoicePreferenceChange: (nextPreference: SpeechVoicePreference) => void;
@@ -1240,9 +1264,13 @@ function SettingsScreen(props: {
   const settingsTitleId = useId();
   const languageId = useId();
   const startupId = useId();
+  const interfaceTextScaleId = useId();
+  const readerTextScaleId = useId();
+  const contrastModeId = useId();
   const speechVoiceModeId = useId();
   const speechVoiceId = useId();
   const voiceSummaryId = useId();
+  const displayHintId = useId();
   const voiceModeHintId = useId();
   const voicePickerHintId = useId();
   const voiceFallbackId = useId();
@@ -1276,7 +1304,7 @@ function SettingsScreen(props: {
           <div className="panel-section-header">
             <p className="panel-kicker">Preferences</p>
             <h3 id="settings-interface-title">Interface settings</h3>
-            <p>Minimal placeholders with clear labels and predictable controls.</p>
+            <p>Small display adjustments keep the layout calm while making text easier to read.</p>
           </div>
           <div className="form-grid" role="group" aria-label="Interface preferences">
             <label className="field" htmlFor={languageId}>
@@ -1293,6 +1321,47 @@ function SettingsScreen(props: {
                 <option value="home">Home</option>
                 <option value="reader">Reader</option>
                 <option value="settings">Settings</option>
+              </select>
+            </label>
+
+            <label className="field" htmlFor={interfaceTextScaleId}>
+              <span>App text size</span>
+              <select
+                id={interfaceTextScaleId}
+                value={props.interfaceTextScale}
+                onChange={(event) => props.onInterfaceTextScaleChange(parseInterfaceTextScale(event.target.value))}
+                aria-describedby={displayHintId}
+              >
+                <option value="default">Standard</option>
+                <option value="large">Large</option>
+                <option value="largest">Largest</option>
+              </select>
+            </label>
+
+            <label className="field" htmlFor={readerTextScaleId}>
+              <span>Reader text size</span>
+              <select
+                id={readerTextScaleId}
+                value={props.readerTextScale}
+                onChange={(event) => props.onReaderTextScaleChange(parseReaderTextScale(event.target.value))}
+                aria-describedby={displayHintId}
+              >
+                <option value="default">Standard</option>
+                <option value="large">Large</option>
+                <option value="largest">Largest</option>
+              </select>
+            </label>
+
+            <label className="field" htmlFor={contrastModeId}>
+              <span>Contrast</span>
+              <select
+                id={contrastModeId}
+                value={props.contrastMode}
+                onChange={(event) => props.onContrastModeChange(parseContrastMode(event.target.value))}
+                aria-describedby={displayHintId}
+              >
+                <option value="default">Calm contrast</option>
+                <option value="strong">Stronger contrast</option>
               </select>
             </label>
 
@@ -1318,6 +1387,9 @@ function SettingsScreen(props: {
               </select>
             </label>
           </div>
+          <p id={displayHintId} className="hint">
+            These display changes only adjust size and contrast. Keyboard shortcuts, focus order, playback, and screen-reader labels stay the same.
+          </p>
           <p id={voiceSummaryId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
             {voiceSummary}
           </p>
@@ -1424,6 +1496,11 @@ export function App() {
   );
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(initialPersistenceState.lastOpenedParagraphIndex);
   const [playbackRate, setPlaybackRate] = useState(initialPersistenceState.readingSpeed);
+  const [interfaceTextScale, setInterfaceTextScale] = useState<InterfaceTextScale>(
+    initialPersistenceState.interfaceTextScale
+  );
+  const [readerTextScale, setReaderTextScale] = useState<ReaderTextScale>(initialPersistenceState.readerTextScale);
+  const [contrastMode, setContrastMode] = useState<ContrastMode>(initialPersistenceState.contrastMode);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(initialPersistenceState.hasSeenOnboarding);
   const [speechVoicePreference, setSpeechVoicePreference] = useState<SpeechVoicePreference>(
     initialPersistenceState.speechVoicePreference
@@ -1448,6 +1525,10 @@ export function App() {
   const activeLoadRef = useRef<ActiveDocumentLoad | null>(null);
   const nextLoadRequestIdRef = useRef(0);
   const currentScreen = screens.find((screen) => screen.id === activeScreen)!;
+  const appShellStyle = {
+    "--app-font-scale": interfaceTextScaleValueMap[interfaceTextScale].toString(),
+    "--reader-font-scale": readerTextScaleValueMap[readerTextScale].toString()
+  } as CSSProperties;
 
   function announce(text: string) {
     setLiveMessage((current) => ({
@@ -1766,6 +1847,9 @@ export function App() {
       recentDocuments,
       bookmarksByDocument,
       readingSpeed: clampReadingSpeed(playbackRate),
+      interfaceTextScale,
+      readerTextScale,
+      contrastMode,
       speechVoicePreference,
       preferredVoiceId,
       lastOpenedDocumentPath,
@@ -1775,14 +1859,17 @@ export function App() {
     });
   }, [
     bookmarksByDocument,
+    contrastMode,
     currentParagraphIndex,
     documentState.filePath,
     documentState.text,
     hasSeenOnboarding,
+    interfaceTextScale,
     lastOpenedDocumentPath,
     playbackRate,
     preferredVoiceId,
     recentDocuments,
+    readerTextScale,
     speechVoicePreference
   ]);
 
@@ -1805,7 +1892,10 @@ export function App() {
   }, [initialPersistenceState.lastOpenedDocumentPath, initialPersistenceState.lastOpenedParagraphIndex]);
 
   return (
-    <div className="app-shell">
+    <div
+      className={contrastMode === "strong" ? "app-shell app-shell-strong-contrast" : "app-shell"}
+      style={appShellStyle}
+    >
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
@@ -1883,6 +1973,12 @@ export function App() {
           )}
           {activeScreen === "settings" && (
             <SettingsScreen
+              interfaceTextScale={interfaceTextScale}
+              onInterfaceTextScaleChange={setInterfaceTextScale}
+              readerTextScale={readerTextScale}
+              onReaderTextScaleChange={setReaderTextScale}
+              contrastMode={contrastMode}
+              onContrastModeChange={setContrastMode}
               availableVoices={availableVoices}
               speechVoicePreference={speechVoicePreference}
               onSpeechVoicePreferenceChange={setSpeechVoicePreference}

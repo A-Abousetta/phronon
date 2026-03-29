@@ -1,5 +1,9 @@
 import type { SpeechVoicePreference } from "./speechVoices.js";
 
+export type InterfaceTextScale = "default" | "large" | "largest";
+export type ReaderTextScale = "default" | "large" | "largest";
+export type ContrastMode = "default" | "strong";
+
 export type ReaderDocumentState = {
   filePath: string | null;
   text: string | null;
@@ -26,6 +30,9 @@ export type ReaderPersistenceState = {
   recentDocuments: RecentDocument[];
   bookmarksByDocument: Record<string, ParagraphBookmark[]>;
   readingSpeed: number;
+  interfaceTextScale: InterfaceTextScale;
+  readerTextScale: ReaderTextScale;
+  contrastMode: ContrastMode;
   speechVoicePreference: SpeechVoicePreference;
   preferredVoiceId: string | null;
   lastOpenedDocumentPath: string | null;
@@ -52,6 +59,9 @@ export const defaultReaderPersistenceState: ReaderPersistenceState = {
   recentDocuments: [],
   bookmarksByDocument: {},
   readingSpeed: DEFAULT_READING_SPEED,
+  interfaceTextScale: "default",
+  readerTextScale: "default",
+  contrastMode: "default",
   speechVoicePreference: "automatic",
   preferredVoiceId: null,
   lastOpenedDocumentPath: null,
@@ -79,6 +89,18 @@ export function clampReadingSpeed(value: number) {
 
   const roundedValue = Math.round(value * 10) / 10;
   return Math.min(MAX_READING_SPEED, Math.max(MIN_READING_SPEED, roundedValue));
+}
+
+export function parseInterfaceTextScale(value: unknown): InterfaceTextScale {
+  return value === "large" || value === "largest" ? value : "default";
+}
+
+export function parseReaderTextScale(value: unknown): ReaderTextScale {
+  return value === "large" || value === "largest" ? value : "default";
+}
+
+export function parseContrastMode(value: unknown): ContrastMode {
+  return value === "strong" ? "strong" : "default";
 }
 
 export function createLoadedDocumentState(result: {
@@ -312,6 +334,9 @@ export function parseReaderPersistenceState(rawValue: string | null): ReaderPers
       readingSpeed: clampReadingSpeed(
         typeof parsed.readingSpeed === "number" ? parsed.readingSpeed : DEFAULT_READING_SPEED
       ),
+      interfaceTextScale: parseInterfaceTextScale(parsed.interfaceTextScale),
+      readerTextScale: parseReaderTextScale(parsed.readerTextScale),
+      contrastMode: parseContrastMode(parsed.contrastMode),
       speechVoicePreference:
         parsed.speechVoicePreference === "default"
           ? "default"

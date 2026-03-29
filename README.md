@@ -111,9 +111,14 @@ The supported English phrases are intentionally narrow: `open file`, `play`, `pa
 If browser speech recognition is unavailable or microphone permission is denied, Phronon fails clearly with a status message and keeps all existing Reader controls working normally.
 
 ## Reader persistence
-The desktop app now keeps a small local reader snapshot in the Electron renderer so study context survives restarts without any cloud service or new dependency. Phronon remembers the recent documents list, the current reading speed, the selected speech voice mode, the last opened document path, and the last active paragraph for that document. If opening a new document fails, Phronon keeps the current document and paragraph position in place and explains that the attempted file did not open.
+The desktop app now keeps a small local reader snapshot in the Electron renderer so study context survives restarts without any cloud service or new dependency. Phronon remembers the recent documents list, the current reading speed, low-vision display preferences, the selected speech voice mode, the last opened document path, and the last active paragraph for that document. If opening a new document fails, Phronon keeps the current document and paragraph position in place and explains that the attempted file did not open.
 
 On launch, Phronon restores the recent documents list and reading speed immediately. If the last opened file can still be read, the app reopens it and restores the saved paragraph position. If the file has moved, been deleted, or cannot be reopened, Phronon fails softly by leaving the app usable and showing the normal loading error instead of blocking the interface.
+
+## Low-vision display controls
+Phronon now includes a small set of low-vision-friendly display controls in `Settings` without changing the main workflow. Users can increase general app text size, increase Reader text size separately, and switch to a stronger contrast mode that makes surfaces, borders, status cards, and the reading area easier to distinguish while keeping the same calm layout.
+
+These preferences are local-first and persist across restarts. Keyboard shortcuts, focus order, playback behavior, TXT/PDF/OCR loading, and screen-reader labels continue to behave the same way.
 
 ## Manual test steps
 1. Run `npm run dev` from the repository root.
@@ -148,6 +153,9 @@ On launch, Phronon restores the recent documents list and reading speed immediat
 30. Open a document, move to a later paragraph, change the reading speed, restart the app, and confirm the recent list and reading speed are restored.
 31. If the same document still exists, confirm it reopens and the highlighted paragraph returns to the saved position.
 32. Rename or remove the last opened file, restart the app, and confirm Phronon stays usable while showing a clear load failure.
+33. Open `Settings`, change `App text size`, `Reader text size`, and `Contrast`, then restart the app and confirm those display preferences persist.
+34. With larger Reader text enabled, confirm the Reader layout still wraps cleanly, the current paragraph highlight stays visible, and playback controls remain usable.
+35. With `Stronger contrast` enabled, confirm focus outlines, status regions, and the current paragraph are easier to distinguish without changing keyboard or playback behavior.
 
 ## Next steps
 - Add local text extraction pipeline
