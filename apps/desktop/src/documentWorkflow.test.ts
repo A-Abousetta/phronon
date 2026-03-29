@@ -78,8 +78,10 @@ test("parseReaderPersistenceState returns safe defaults for invalid data", () =>
     recentDocuments: [],
     readingSpeed: 1,
     speechVoicePreference: "automatic",
+    preferredVoiceId: null,
     lastOpenedDocumentPath: null,
-    lastOpenedParagraphIndex: 0
+    lastOpenedParagraphIndex: 0,
+    hasSeenOnboarding: false
   });
 });
 
@@ -98,9 +100,11 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
       }
     ],
     readingSpeed: 2.7,
-    speechVoicePreference: "default",
+    speechVoicePreference: "manual",
+    preferredVoiceId: "uri:voice-ar-sa",
     lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
-    lastOpenedParagraphIndex: 4.8
+    lastOpenedParagraphIndex: 4.8,
+    hasSeenOnboarding: true
   }));
 
   assert.deepEqual(parsed, {
@@ -113,9 +117,11 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
       }
     ],
     readingSpeed: 2,
-    speechVoicePreference: "default",
+    speechVoicePreference: "manual",
+    preferredVoiceId: "uri:voice-ar-sa",
     lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
-    lastOpenedParagraphIndex: 4
+    lastOpenedParagraphIndex: 4,
+    hasSeenOnboarding: true
   });
 });
 

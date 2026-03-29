@@ -25,6 +25,70 @@ const plainReaderShortcutMap: Record<string, Exclude<ReaderShortcutAction, "togg
   s: "stop"
 };
 
+function normalizeLine(line: string) {
+  return line.replace(/\s+/g, " ").trim();
+}
+
+function looksLikeStructuralLine(line: string) {
+  return /^[-*•]\s+/.test(line) || /^\d+[\.\)]\s+/.test(line) || /[:;]$/.test(line);
+}
+
+function shouldMergeLines(currentLine: string, nextLine: string) {
+  const current = normalizeLine(currentLine);
+  const next = normalizeLine(nextLine);
+
+  if (!current || !next) {
+    return false;
+  }
+
+  if (looksLikeStructuralLine(current) || looksLikeStructuralLine(next)) {
+    return false;
+  }
+
+  const currentEndsWithSentencePunctuation = /[.!?]["')\]]?$/.test(current);
+  const currentEndsWithSoftWrapHint = /[,:\-\u2013\u2014]$/.test(current);
+  const nextStartsLowercase = /^[a-z(]/.test(next);
+  const currentLooksShort = current.length <= 90;
+  const nextLooksShort = next.length <= 90;
+
+  if (currentEndsWithSoftWrapHint) {
+    return true;
+  }
+
+  if (!currentEndsWithSentencePunctuation && (nextStartsLowercase || currentLooksShort || nextLooksShort)) {
+    return true;
+  }
+
+  return false;
+}
+
+function buildParagraphFromBlock(block: string) {
+  const lines = block
+    .split("\n")
+    .map(normalizeLine)
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return [];
+  }
+
+  const paragraphs: string[] = [];
+  let currentParagraph = lines[0];
+
+  for (const nextLine of lines.slice(1)) {
+    if (shouldMergeLines(currentParagraph, nextLine)) {
+      currentParagraph = `${currentParagraph} ${nextLine}`.trim();
+      continue;
+    }
+
+    paragraphs.push(currentParagraph);
+    currentParagraph = nextLine;
+  }
+
+  paragraphs.push(currentParagraph);
+  return paragraphs;
+}
+
 export function splitIntoParagraphs(text: string | null) {
   if (!text) {
     return [];
@@ -33,7 +97,7 @@ export function splitIntoParagraphs(text: string | null) {
   return text
     .replace(/\r\n/g, "\n")
     .split(/\n\s*\n+/)
-    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, " ").trim())
+    .flatMap((block) => buildParagraphFromBlock(block))
     .filter(Boolean);
 }
 

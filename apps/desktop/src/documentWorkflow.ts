@@ -19,8 +19,10 @@ export type ReaderPersistenceState = {
   recentDocuments: RecentDocument[];
   readingSpeed: number;
   speechVoicePreference: SpeechVoicePreference;
+  preferredVoiceId: string | null;
   lastOpenedDocumentPath: string | null;
   lastOpenedParagraphIndex: number;
+  hasSeenOnboarding: boolean;
 };
 
 export type DocumentLoadOrigin = "startupRestore" | "filePicker" | "recentDocument";
@@ -42,8 +44,10 @@ export const defaultReaderPersistenceState: ReaderPersistenceState = {
   recentDocuments: [],
   readingSpeed: DEFAULT_READING_SPEED,
   speechVoicePreference: "automatic",
+  preferredVoiceId: null,
   lastOpenedDocumentPath: null,
-  lastOpenedParagraphIndex: 0
+  lastOpenedParagraphIndex: 0,
+  hasSeenOnboarding: false
 };
 
 export function getDocumentFileName(filePath: string) {
@@ -194,7 +198,9 @@ export function parseReaderPersistenceState(rawValue: string | null): ReaderPers
   }
 
   try {
-    const parsed = JSON.parse(rawValue) as Partial<ReaderPersistenceState>;
+    const parsed = JSON.parse(rawValue) as Partial<ReaderPersistenceState> & {
+      preferredVoiceURI?: string;
+    };
     const recentDocuments = Array.isArray(parsed.recentDocuments)
       ? parsed.recentDocuments.filter(isRecentDocument).slice(0, 8)
       : [];
@@ -205,14 +211,25 @@ export function parseReaderPersistenceState(rawValue: string | null): ReaderPers
         typeof parsed.readingSpeed === "number" ? parsed.readingSpeed : DEFAULT_READING_SPEED
       ),
       speechVoicePreference:
-        parsed.speechVoicePreference === "default" ? "default" : "automatic",
+        parsed.speechVoicePreference === "default"
+          ? "default"
+          : parsed.speechVoicePreference === "manual"
+            ? "manual"
+            : "automatic",
+      preferredVoiceId:
+        typeof parsed.preferredVoiceId === "string" && parsed.preferredVoiceId.trim().length > 0
+          ? parsed.preferredVoiceId
+          : typeof parsed.preferredVoiceURI === "string" && parsed.preferredVoiceURI.trim().length > 0
+            ? parsed.preferredVoiceURI
+          : null,
       lastOpenedDocumentPath:
         typeof parsed.lastOpenedDocumentPath === "string" && parsed.lastOpenedDocumentPath.trim().length > 0
           ? parsed.lastOpenedDocumentPath
           : null,
       lastOpenedParagraphIndex: clampParagraphIndex(
         typeof parsed.lastOpenedParagraphIndex === "number" ? parsed.lastOpenedParagraphIndex : 0
-      )
+      ),
+      hasSeenOnboarding: parsed.hasSeenOnboarding === true
     };
   } catch {
     return defaultReaderPersistenceState;

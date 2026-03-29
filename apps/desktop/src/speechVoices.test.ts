@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildVoiceDiagnosticsSummary,
   chooseSpeechVoice,
   findArabicVoice,
   findDefaultVoice,
+  findVoiceById,
+  getVoiceIdentifier,
+  getVoiceDisplayName,
   isArabicCapableVoice,
   textContainsArabicScript,
   type SpeechVoicePreference
@@ -36,12 +40,15 @@ test("isArabicCapableVoice accepts Arabic language codes and fallback names", ()
 });
 
 test("voice helpers prefer explicit default and Arabic matches when available", () => {
-  const englishDefault = createVoice({ name: "English Default", lang: "en-US", default: true });
-  const arabic = createVoice({ name: "Arabic Reader", lang: "ar-EG" });
+  const englishDefault = createVoice({ name: "English Default", lang: "en-US", default: true, voiceURI: "default-uri" });
+  const arabic = createVoice({ name: "Arabic Reader", lang: "ar-EG", voiceURI: "arabic-uri" });
   const voices = [englishDefault, arabic];
 
   assert.equal(findDefaultVoice(voices), englishDefault);
   assert.equal(findArabicVoice(voices), arabic);
+  assert.equal(getVoiceIdentifier(arabic), "uri:arabic-uri");
+  assert.equal(findVoiceById(voices, "uri:arabic-uri"), arabic);
+  assert.equal(getVoiceDisplayName(arabic), "Arabic Reader (ar-EG)");
 });
 
 test("chooseSpeechVoice prefers Arabic for Arabic text and falls back safely", () => {
@@ -87,4 +94,53 @@ test("chooseSpeechVoice keeps the default voice for non-Arabic text or default m
     assert.equal(choice.warning, null);
     assert.equal(choice.detectedLanguage, "default");
   }
+});
+
+test("chooseSpeechVoice allows a manual preferred voice and falls back clearly", () => {
+  const englishDefault = createVoice({ name: "English Default", lang: "en-US", default: true, voiceURI: "default-uri" });
+  const manualVoice = createVoice({ name: "Manual Voice", lang: "en-GB", voiceURI: "manual-uri" });
+
+  const manualChoice = chooseSpeechVoice({
+    voices: [englishDefault, manualVoice],
+    text: "مرحبا",
+    preference: "manual",
+    preferredVoiceId: "uri:manual-uri"
+  });
+
+  assert.equal(manualChoice.voice, manualVoice);
+  assert.equal(manualChoice.detectedLanguage, "manual");
+  assert.equal(manualChoice.warning, null);
+
+  const fallbackChoice = chooseSpeechVoice({
+    voices: [englishDefault],
+    text: "Hello",
+    preference: "manual",
+    preferredVoiceId: "uri:missing-uri"
+  });
+
+  assert.equal(fallbackChoice.voice, englishDefault);
+  assert.equal(fallbackChoice.detectedLanguage, "manual");
+  assert.match(fallbackChoice.warning ?? "", /preferred playback voice is no longer available/i);
+
+  const systemDefaultChoice = chooseSpeechVoice({
+    voices: [englishDefault],
+    text: "Hello",
+    preference: "manual",
+    preferredVoiceId: null
+  });
+
+  assert.equal(systemDefaultChoice.voice, englishDefault);
+  assert.equal(systemDefaultChoice.warning, null);
+});
+
+test("buildVoiceDiagnosticsSummary describes voice availability clearly", () => {
+  const englishDefault = createVoice({ name: "English Default", lang: "en-US", default: true });
+  const arabic = createVoice({ name: "Arabic Reader", lang: "ar-SA" });
+
+  assert.equal(buildVoiceDiagnosticsSummary([], false), "Checking available speech voices on this device.");
+  assert.equal(buildVoiceDiagnosticsSummary([], true), "No speech voices were reported by the system yet.");
+  assert.equal(
+    buildVoiceDiagnosticsSummary([englishDefault, arabic], true),
+    "2 speech voices detected, including Arabic support."
+  );
 });

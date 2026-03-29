@@ -1,4 +1,4 @@
-export type SpeechVoicePreference = "automatic" | "default";
+export type SpeechVoicePreference = "automatic" | "default" | "manual";
 
 type VoiceLike = Pick<SpeechSynthesisVoice, "default" | "lang" | "name" | "voiceURI">;
 
@@ -12,6 +12,19 @@ function normalizeVoiceTextPart(value: string | null | undefined) {
 
 function buildVoiceSearchText(voice: VoiceLike) {
   return [voice.name, voice.lang, voice.voiceURI].map(normalizeVoiceTextPart).filter(Boolean).join(" ");
+}
+
+export function getVoiceIdentifier(voice: Pick<SpeechSynthesisVoice, "lang" | "name" | "voiceURI">) {
+  const voiceUri = normalizeVoiceTextPart(voice.voiceURI);
+
+  if (voiceUri) {
+    return `uri:${voiceUri}`;
+  }
+
+  const voiceName = normalizeVoiceTextPart(voice.name) || "unnamed-voice";
+  const voiceLanguage = normalizeVoiceTextPart(voice.lang) || "unknown-language";
+
+  return `name:${voiceName}::lang:${voiceLanguage}`;
 }
 
 export function textContainsArabicScript(text: string | null | undefined) {
@@ -41,15 +54,77 @@ export function findArabicVoice(voices: SpeechSynthesisVoice[]) {
   return arabicVoices.find((voice) => Boolean(voice.default)) ?? arabicVoices[0] ?? null;
 }
 
+export function findVoiceById(voices: SpeechSynthesisVoice[], voiceId: string | null | undefined) {
+  const normalizedVoiceId = normalizeVoiceTextPart(voiceId);
+
+  if (!normalizedVoiceId) {
+    return null;
+  }
+
+  return voices.find((voice) => getVoiceIdentifier(voice) === normalizedVoiceId) ?? null;
+}
+
+export function getVoiceDisplayName(voice: Pick<SpeechSynthesisVoice, "lang" | "name" | "voiceURI">) {
+  const voiceName = normalizeVoiceTextPart(voice.name) || normalizeVoiceTextPart(voice.voiceURI) || "Unnamed voice";
+  const voiceLanguage = normalizeVoiceTextPart(voice.lang) || "Unknown language";
+
+  return `${voiceName} (${voiceLanguage})`;
+}
+
+export function buildVoiceDiagnosticsSummary(voices: SpeechSynthesisVoice[], voicesInitialized: boolean) {
+  const hasArabicVoice = findArabicVoice(voices) !== null;
+
+  if (!voicesInitialized) {
+    return "Checking available speech voices on this device.";
+  }
+
+  if (voices.length === 0) {
+    return "No speech voices were reported by the system yet.";
+  }
+
+  if (hasArabicVoice) {
+    return `${voices.length} speech voices detected, including Arabic support.`;
+  }
+
+  return `${voices.length} speech voices detected. No Arabic voice was reported.`;
+}
+
 export function chooseSpeechVoice(options: {
   voices: SpeechSynthesisVoice[];
   text: string | null | undefined;
   preference?: SpeechVoicePreference;
+  preferredVoiceId?: string | null;
 }) {
+  const preferredVoice = findVoiceById(options.voices, options.preferredVoiceId);
   const wantsArabicVoice =
-    options.preference !== "default" && textContainsArabicScript(options.text);
+    options.preference !== "default" && options.preference !== "manual" && textContainsArabicScript(options.text);
   const defaultVoice = findDefaultVoice(options.voices);
   const arabicVoice = findArabicVoice(options.voices);
+
+  if (options.preference === "manual") {
+    if (!normalizeVoiceTextPart(options.preferredVoiceId)) {
+      return {
+        voice: defaultVoice,
+        detectedLanguage: "manual" as const,
+        warning: null
+      };
+    }
+
+    if (preferredVoice) {
+      return {
+        voice: preferredVoice,
+        detectedLanguage: "manual" as const,
+        warning: null
+      };
+    }
+
+    return {
+      voice: defaultVoice,
+      detectedLanguage: "manual" as const,
+      warning:
+        "Your preferred playback voice is no longer available on this device. Playback will use the default voice until you choose another voice in Settings."
+    };
+  }
 
   if (wantsArabicVoice && arabicVoice) {
     return {

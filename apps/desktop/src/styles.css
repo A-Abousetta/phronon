@@ -180,6 +180,44 @@ select:disabled {
   gap: 1rem;
 }
 
+.welcome-panel {
+  display: grid;
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.9rem;
+  background: linear-gradient(180deg, rgba(69, 119, 106, 0.18), rgba(36, 50, 47, 0.6));
+}
+
+.welcome-panel-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.welcome-panel-header h2,
+.welcome-panel-text {
+  margin: 0;
+}
+
+.welcome-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.welcome-panel-list {
+  list-style: disc;
+  padding-inline-start: 1.25rem;
+}
+
+.welcome-panel-list li {
+  padding: 0;
+}
+
 .page-banner,
 .panel-section {
   border: 1px solid var(--border);
@@ -303,6 +341,10 @@ select:disabled {
 
 .primary-button,
 .controls button {
+  padding: 0.8rem 1rem;
+}
+
+.secondary-button {
   padding: 0.8rem 1rem;
 }
 
@@ -591,6 +633,28 @@ select:disabled {
   font-size: 0.9rem;
 }
 
+.voice-diagnostics-list {
+  margin-top: 0.25rem;
+}
+
+.voice-diagnostics-item {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface-muted);
+}
+
+.voice-diagnostics-name {
+  font-weight: 600;
+}
+
+.voice-diagnostics-meta {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
@@ -606,6 +670,7 @@ select:disabled {
   }
 
   .page-banner,
+  .welcome-panel-header,
   .page-columns,
   .app-header-inner,
   .app-header-copy,
