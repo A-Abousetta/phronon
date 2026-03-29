@@ -29,8 +29,18 @@ class OcrExtractionError(RuntimeError):
     """Raised when OCR setup exists but the extraction process fails."""
 
 
+class BackendDependencyError(RuntimeError):
+    """Raised when required local Python packages are missing."""
+
+
 def extract_pdf_text(file_path: Path) -> str:
-    pdf_reader_module = importlib.import_module("pypdf")
+    try:
+        pdf_reader_module = importlib.import_module("pypdf")
+    except ImportError as exc:
+        raise BackendDependencyError(
+            "PDF support needs the local Python package pypdf. Install it with `python -m pip install pypdf` and try again."
+        ) from exc
+
     pdf_reader = pdf_reader_module.PdfReader
     reader = pdf_reader(str(file_path))
     extracted_pages = []
@@ -268,6 +278,17 @@ def handle_extract_text(file_path: Path) -> int:
 
     try:
         text = extract_pdf_text(file_path)
+    except BackendDependencyError as error:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "reason": "read_error",
+                    "error": str(error)
+                }
+            )
+        )
+        return 0
     except Exception:
         print(
             json.dumps(
@@ -325,6 +346,72 @@ def handle_extract_text(file_path: Path) -> int:
     return 0
 
 
+def handle_ocr_extract_text(file_path: Path) -> int:
+    if not file_path.exists() or not file_path.is_file():
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "reason": "file_not_found",
+                    "error": "Phronon could not find that file."
+                }
+            )
+        )
+        return 1
+
+    if file_path.suffix.lower() != ".pdf":
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "reason": "unsupported_file",
+                    "error": "Only PDF extraction is supported by this backend command."
+                }
+            )
+        )
+        return 1
+
+    try:
+        ocr_text = extract_pdf_text_with_ocr(file_path)
+    except OcrDependencyError as error:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "reason": "ocr_dependencies_missing",
+                    "error": str(error)
+                }
+            )
+        )
+        return 0
+    except OcrExtractionError as error:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "reason": "ocr_failed",
+                    "error": str(error)
+                }
+            )
+        )
+        return 0
+
+    if not has_usable_text(ocr_text):
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "reason": "ocr_no_text",
+                    "error": "Phronon tried local OCR for this PDF, but could not extract enough readable text. The scan may be blurry, rotated, or missing the right OCR language data."
+                }
+            )
+        )
+        return 0
+
+    print(json.dumps({"ok": True, "reason": "success", "text": ocr_text}))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="phronon_backend")
     subparsers = parser.add_subparsers(dest="command")
@@ -335,6 +422,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extract_text_parser.add_argument("--file", required=True, type=Path)
 
+    ocr_extract_text_parser = subparsers.add_parser(
+        "ocr-extract-text",
+        help="Extract text from a local PDF file using OCR only."
+    )
+    ocr_extract_text_parser.add_argument("--file", required=True, type=Path)
+
     return parser
 
 
@@ -344,6 +437,9 @@ def main() -> None:
 
     if args.command == "extract-text":
         sys.exit(handle_extract_text(args.file))
+
+    if args.command == "ocr-extract-text":
+        sys.exit(handle_ocr_extract_text(args.file))
 
     project_root = Path(__file__).resolve().parents[3]
     print("Phronon backend scaffold is ready.")

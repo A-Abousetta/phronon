@@ -3,8 +3,8 @@
 The backend folder holds the local Python services that will handle document import and text extraction.
 
 Current document extraction support:
-- Text-based PDFs are read with `pypdf`.
-- Scanned or image-only PDFs can fall back to local OCR when direct extraction does not return enough usable text.
+- The packaged desktop app now handles standard text-based PDFs directly.
+- This backend is mainly needed for optional OCR on scanned or image-only PDFs.
 
 Optional OCR dependencies:
 - Python packages: `pytesseract`, `pypdfium2`, and `Pillow`

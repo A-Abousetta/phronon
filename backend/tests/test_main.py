@@ -12,7 +12,13 @@ BACKEND_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from phronon_backend.__main__ import OcrDependencyError, handle_extract_text, has_usable_text
+from phronon_backend.__main__ import (
+    BackendDependencyError,
+    OcrDependencyError,
+    handle_extract_text,
+    handle_ocr_extract_text,
+    has_usable_text,
+)
 from phronon_backend.__main__ import cleanup_ocr_text
 
 
@@ -93,6 +99,24 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "ocr_dependencies_missing")
         self.assertEqual(payload["error"], "Install local OCR dependencies.")
 
+    def test_handle_extract_text_reports_missing_pdf_dependency_clearly(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            with patch(
+                "phronon_backend.__main__.extract_pdf_text",
+                side_effect=BackendDependencyError("Install pypdf first.")
+            ):
+                stdout = io.StringIO()
+
+                with redirect_stdout(stdout):
+                    result_code = handle_extract_text(Path(handle.name))
+
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(result_code, 0)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["reason"], "read_error")
+        self.assertEqual(payload["error"], "Install pypdf first.")
+
     def test_handle_extract_text_reports_when_ocr_finds_no_usable_text(self):
         with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
             with patch("phronon_backend.__main__.extract_pdf_text", return_value=""), patch(
@@ -110,6 +134,24 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["reason"], "ocr_no_text")
         self.assertIn("blurry, rotated, or missing", payload["error"])
+
+    def test_handle_ocr_extract_text_uses_ocr_only_command(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            with patch(
+                "phronon_backend.__main__.extract_pdf_text_with_ocr",
+                return_value="OCR recovered enough readable words from the scanned document for playback to work."
+            ):
+                stdout = io.StringIO()
+
+                with redirect_stdout(stdout):
+                    result_code = handle_ocr_extract_text(Path(handle.name))
+
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(result_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["reason"], "success")
+        self.assertIn("OCR recovered enough readable words", payload["text"])
 
 
 if __name__ == "__main__":
