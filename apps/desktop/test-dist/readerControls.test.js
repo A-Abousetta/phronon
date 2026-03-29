@@ -3,6 +3,8 @@ import { getAppShortcutAction, getReaderShortcutAction, splitIntoParagraphs, spl
 function runTests() {
     const paragraphs = splitIntoParagraphs("First line\nstill first\n\nSecond paragraph\r\n\r\nThird");
     assert.deepEqual(paragraphs, ["First line still first", "Second paragraph", "Third"]);
+    assert.deepEqual(splitIntoParagraphs("This is a wrapped PDF line\nthat continues the same thought\nand should stay together.\n\nNew section starts here."), ["This is a wrapped PDF line that continues the same thought and should stay together.", "New section starts here."]);
+    assert.deepEqual(splitIntoParagraphs("Heading:\nA short explanatory line\ncontinues here\n\n1. First list item\n2. Second list item"), ["Heading:", "A short explanatory line continues here", "1. First list item", "2. Second list item"]);
     assert.deepEqual(splitIntoParagraphs(null), []);
     assert.deepEqual(splitIntoParagraphs(" \n \n "), []);
     assert.deepEqual(splitParagraphIntoSpeechChunks("Single sentence"), ["Single sentence"]);

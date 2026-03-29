@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildBookmarkPreviewText,
   buildDocumentLoadStatusMessage,
   buildReaderDocumentStatusMessage,
   buildRecentDocumentButtonLabel,
   buildDocumentOpenFailureMessage,
   clampParagraphIndex,
   clampReadingSpeed,
+  createParagraphBookmark,
+  getBookmarksForDocument,
   getDocumentFileName,
   parseReaderPersistenceState,
+  upsertParagraphBookmark,
   upsertRecentDocument
 } from "./documentWorkflow.js";
 
@@ -76,6 +80,7 @@ test("upsertRecentDocument deduplicates by file path and moves reopened files to
 test("parseReaderPersistenceState returns safe defaults for invalid data", () => {
   assert.deepEqual(parseReaderPersistenceState("{not valid json"), {
     recentDocuments: [],
+    bookmarksByDocument: {},
     readingSpeed: 1,
     speechVoicePreference: "automatic",
     preferredVoiceId: null,
@@ -99,6 +104,19 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
         filePath: 4
       }
     ],
+    bookmarksByDocument: {
+      "C:\\docs\\Notes.txt": [
+        {
+          documentPath: "C:\\docs\\Notes.txt",
+          paragraphIndex: 3.8,
+          previewText: "Saved paragraph preview",
+          createdAt: 4000
+        },
+        {
+          documentPath: 4
+        }
+      ]
+    },
     readingSpeed: 2.7,
     speechVoicePreference: "manual",
     preferredVoiceId: "uri:voice-ar-sa",
@@ -116,6 +134,16 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
         lastOpenedAt: 1200
       }
     ],
+    bookmarksByDocument: {
+      "C:\\docs\\Notes.txt": [
+        {
+          documentPath: "C:\\docs\\Notes.txt",
+          paragraphIndex: 3,
+          previewText: "Saved paragraph preview",
+          createdAt: 4000
+        }
+      ]
+    },
     readingSpeed: 2,
     speechVoicePreference: "manual",
     preferredVoiceId: "uri:voice-ar-sa",
@@ -214,5 +242,60 @@ test("buildDocumentLoadStatusMessage explains the active load operation", () => 
       origin: "filePicker"
     }),
     "Waiting for you to choose a document to open."
+  );
+});
+
+test("bookmark helpers build, store, and read document-scoped bookmarks", () => {
+  const bookmark = createParagraphBookmark({
+    documentPath: "C:\\docs\\Notes.txt",
+    paragraphIndex: 2,
+    paragraphText: "This is a longer paragraph preview that should stay readable in the bookmark list.",
+    now: 5000
+  });
+
+  assert.deepEqual(bookmark, {
+    documentPath: "C:\\docs\\Notes.txt",
+    paragraphIndex: 2,
+    previewText: "This is a longer paragraph preview that should stay readable in the bookmark list.",
+    createdAt: 5000
+  });
+
+  const updatedBookmarks = upsertParagraphBookmark(
+    [
+      {
+        documentPath: "C:\\docs\\Notes.txt",
+        paragraphIndex: 5,
+        previewText: "Later paragraph",
+        createdAt: 2000
+      }
+    ],
+    bookmark
+  );
+
+  assert.deepEqual(updatedBookmarks, [
+    bookmark,
+    {
+      documentPath: "C:\\docs\\Notes.txt",
+      paragraphIndex: 5,
+      previewText: "Later paragraph",
+      createdAt: 2000
+    }
+  ]);
+
+  assert.deepEqual(
+    getBookmarksForDocument(
+      {
+        "C:\\docs\\Notes.txt": updatedBookmarks
+      },
+      "C:\\docs\\Notes.txt"
+    ),
+    updatedBookmarks
+  );
+});
+
+test("buildBookmarkPreviewText trims long paragraphs safely", () => {
+  assert.equal(
+    buildBookmarkPreviewText("One two three four five six seven eight nine ten eleven twelve.", 20),
+    "One two three four…"
   );
 });
