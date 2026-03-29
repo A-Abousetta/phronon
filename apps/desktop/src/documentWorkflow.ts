@@ -205,19 +205,22 @@ export function buildDocumentLoadStatusMessage(options: {
   origin: DocumentLoadOrigin;
   filePath?: string | null;
 }) {
+  const isPdf = options.filePath?.toLowerCase().endsWith(".pdf") ?? false;
+  const pdfOcrNote = " If it is scanned, Phronon may need local OCR and this can take a little longer.";
+
   if (options.origin === "startupRestore") {
     return options.filePath
-      ? `Restoring your last document: ${getDocumentFileName(options.filePath)}.`
+      ? `Restoring your last document: ${getDocumentFileName(options.filePath)}.${isPdf ? pdfOcrNote : ""}`
       : "Restoring your last document.";
   }
 
   if (options.origin === "recentDocument") {
     return options.filePath
-      ? `Opening recent document: ${getDocumentFileName(options.filePath)}.`
+      ? `Opening recent document: ${getDocumentFileName(options.filePath)}.${isPdf ? pdfOcrNote : ""}`
       : "Opening a recent document.";
   }
 
-  return "Waiting for you to choose a document to open.";
+  return "Waiting for you to choose a document to open. Scanned PDFs can take a little longer because Phronon may need local OCR.";
 }
 
 export function upsertRecentDocument(

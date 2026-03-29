@@ -88,7 +88,10 @@ The Reader screen now includes an `Open .txt or .pdf file` action that opens the
 PDF support stays intentionally simple in this first step:
 - Text-based PDFs still use the original direct text extraction path.
 - If direct PDF extraction returns little or no usable text, the backend now tries a local OCR fallback for scanned or image-only PDFs.
+- OCR output then goes through a small local cleanup pass that normalizes whitespace, trims simple junk lines, and joins obvious wrapped lines without changing the direct text-PDF path.
 - If OCR dependencies are missing or OCR still cannot recover enough readable text, Phronon shows a clear message instead of failing silently.
+
+When Phronon is opening a PDF, the loading status now warns that scanned PDFs can take longer because local OCR may need to run.
 
 ## Reader text-to-speech playback
 The Reader screen now supports local text-to-speech playback for the currently loaded `.txt` or extracted `.pdf` content using the built-in speech synthesis available in the Electron renderer. `Play` starts or resumes reading from the current paragraph, `Pause` pauses the current speech, `Stop` cancels it, and the reading speed slider adjusts the playback rate for upcoming speech. If no text is loaded, the app announces a clear status message instead of failing silently.

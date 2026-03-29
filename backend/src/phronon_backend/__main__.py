@@ -4,12 +4,21 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 MIN_EXTRACTED_WORDS = 8
 MIN_EXTRACTED_CHARACTERS = 40
 DEFAULT_OCR_LANGUAGES = "eng+ara"
 OCR_RENDER_SCALE = 2
+OCR_BLOCK_BREAK = re.compile(r"\n\s*\n+", flags=re.UNICODE)
+OCR_ZERO_WIDTH_CHARACTERS = re.compile(r"[\u200b-\u200f\u2060\ufeff]", flags=re.UNICODE)
+OCR_EXTRA_SPACES = re.compile(r"[ \t]+", flags=re.UNICODE)
+OCR_SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([,.;:!?%)\]\}،؛؟])", flags=re.UNICODE)
+OCR_SPACE_AFTER_OPENING_PUNCTUATION = re.compile(r"([(\[\{«])\s+", flags=re.UNICODE)
+OCR_TERMINAL_PUNCTUATION = re.compile(r"[.!?؟…;؛:)]$", flags=re.UNICODE)
+OCR_SOFT_WRAP_PUNCTUATION = re.compile(r"[,،\-–—/]$", flags=re.UNICODE)
+OCR_STRUCTURAL_LINE = re.compile(r"^[-*•]\s+|^\d+[\.\)]\s+|[:؛]$", flags=re.UNICODE)
 
 
 class OcrDependencyError(RuntimeError):
@@ -40,6 +49,114 @@ def has_usable_text(text: str) -> bool:
 
 def get_ocr_languages() -> str:
     return os.environ.get("PHRONON_OCR_LANGUAGES", DEFAULT_OCR_LANGUAGES)
+
+
+def normalize_ocr_line(line: str) -> str:
+    normalized_line = unicodedata.normalize("NFKC", line)
+    normalized_line = normalized_line.replace("\u00ad", "")
+    normalized_line = OCR_ZERO_WIDTH_CHARACTERS.sub("", normalized_line)
+    normalized_line = OCR_EXTRA_SPACES.sub(" ", normalized_line)
+    normalized_line = OCR_SPACE_BEFORE_PUNCTUATION.sub(r"\1", normalized_line)
+    normalized_line = OCR_SPACE_AFTER_OPENING_PUNCTUATION.sub(r"\1", normalized_line)
+    return normalized_line.strip()
+
+
+def line_letter_count(line: str) -> int:
+    return sum(1 for character in line if character.isalpha())
+
+
+def line_digit_count(line: str) -> int:
+    return sum(1 for character in line if character.isdigit())
+
+
+def line_symbol_count(line: str) -> int:
+    compact_line = re.sub(r"\s+", "", line, flags=re.UNICODE)
+    return sum(
+        1
+        for character in compact_line
+        if not character.isalpha() and not character.isdigit()
+    )
+
+
+def looks_like_structural_ocr_line(line: str) -> bool:
+    return bool(OCR_STRUCTURAL_LINE.search(line))
+
+
+def looks_like_junk_ocr_line(line: str) -> bool:
+    if not line:
+        return True
+
+    compact_line = re.sub(r"\s+", "", line, flags=re.UNICODE)
+
+    if not compact_line:
+        return True
+
+    letter_count = line_letter_count(compact_line)
+    digit_count = line_digit_count(compact_line)
+    symbol_count = line_symbol_count(compact_line)
+
+    if letter_count == 0 and digit_count == 0:
+        return True
+
+    if len(compact_line) <= 3 and letter_count == 0 and symbol_count > 0:
+        return True
+
+    if len(compact_line) >= 4 and letter_count <= 1 and digit_count <= 1 and symbol_count / len(compact_line) >= 0.6:
+        return True
+
+    return False
+
+
+def should_merge_ocr_lines(current_line: str, next_line: str) -> bool:
+    if not current_line or not next_line:
+        return False
+
+    if looks_like_structural_ocr_line(current_line) or looks_like_structural_ocr_line(next_line):
+        return False
+
+    if OCR_TERMINAL_PUNCTUATION.search(current_line):
+        return False
+
+    if OCR_SOFT_WRAP_PUNCTUATION.search(current_line):
+        return True
+
+    return len(current_line) <= 80 or len(next_line) <= 80
+
+
+def build_ocr_paragraphs_from_block(block: str) -> list[str]:
+    cleaned_lines = [
+        normalize_ocr_line(line)
+        for line in block.splitlines()
+    ]
+    cleaned_lines = [line for line in cleaned_lines if line and not looks_like_junk_ocr_line(line)]
+
+    if not cleaned_lines:
+        return []
+
+    paragraphs: list[str] = []
+    current_paragraph = cleaned_lines[0]
+
+    for next_line in cleaned_lines[1:]:
+        if should_merge_ocr_lines(current_paragraph, next_line):
+            current_paragraph = f"{current_paragraph} {next_line}".strip()
+            continue
+
+        paragraphs.append(current_paragraph)
+        current_paragraph = next_line
+
+    paragraphs.append(current_paragraph)
+    return paragraphs
+
+
+def cleanup_ocr_text(raw_text: str) -> str:
+    normalized_text = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+    paragraph_blocks = OCR_BLOCK_BREAK.split(normalized_text)
+    cleaned_paragraphs: list[str] = []
+
+    for block in paragraph_blocks:
+        cleaned_paragraphs.extend(build_ocr_paragraphs_from_block(block))
+
+    return "\n\n".join(paragraph for paragraph in cleaned_paragraphs if paragraph).strip()
 
 
 def load_ocr_dependencies():
@@ -93,8 +210,9 @@ def extract_pdf_text_with_ocr(file_path: Path) -> str:
                 bitmap = page.render(scale=OCR_RENDER_SCALE)
                 pil_image = bitmap.to_pil()
                 page_text = pytesseract.image_to_string(pil_image, lang=ocr_languages) or ""
-                if page_text.strip():
-                    extracted_pages.append(page_text.strip())
+                cleaned_page_text = cleanup_ocr_text(page_text)
+                if cleaned_page_text:
+                    extracted_pages.append(cleaned_page_text)
             except OcrDependencyError:
                 raise
             except Exception as exc:
@@ -197,7 +315,7 @@ def handle_extract_text(file_path: Path) -> int:
                 {
                     "ok": False,
                     "reason": "ocr_no_text",
-                    "error": "Phronon tried local OCR for this PDF, but could not extract enough readable text."
+                    "error": "Phronon tried local OCR for this PDF, but could not extract enough readable text. The scan may be blurry, rotated, or missing the right OCR language data."
                 }
             )
         )

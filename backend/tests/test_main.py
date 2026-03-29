@@ -13,9 +13,26 @@ if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
 from phronon_backend.__main__ import OcrDependencyError, handle_extract_text, has_usable_text
+from phronon_backend.__main__ import cleanup_ocr_text
 
 
 class PdfExtractionTests(unittest.TestCase):
+    def test_cleanup_ocr_text_merges_wrapped_lines_and_removes_simple_junk(self):
+        raw_text = "Chapter 2\nintro line continues\nwith more detail\n\n---\n\nActual paragraph starts here , with spacing ."
+
+        self.assertEqual(
+            cleanup_ocr_text(raw_text),
+            "Chapter 2 intro line continues with more detail\n\nActual paragraph starts here, with spacing."
+        )
+
+    def test_cleanup_ocr_text_keeps_mixed_language_content_readable(self):
+        raw_text = "مقدمة في الفيزياء \nPhysics basics\n\nالسطر العربي يستمر\nacross the same idea"
+
+        self.assertEqual(
+            cleanup_ocr_text(raw_text),
+            "مقدمة في الفيزياء Physics basics\n\nالسطر العربي يستمر across the same idea"
+        )
+
     def test_has_usable_text_requires_enough_words_and_characters(self):
         self.assertFalse(has_usable_text("Too short"))
         self.assertTrue(
@@ -92,6 +109,7 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual(result_code, 0)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["reason"], "ocr_no_text")
+        self.assertIn("blurry, rotated, or missing", payload["error"])
 
 
 if __name__ == "__main__":

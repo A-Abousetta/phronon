@@ -234,14 +234,14 @@ test("buildDocumentLoadStatusMessage explains the active load operation", () => 
       origin: "recentDocument",
       filePath: "C:\\docs\\Chemistry.pdf"
     }),
-    "Opening recent document: Chemistry.pdf."
+    "Opening recent document: Chemistry.pdf. If it is scanned, Phronon may need local OCR and this can take a little longer."
   );
 
   assert.equal(
     buildDocumentLoadStatusMessage({
       origin: "filePicker"
     }),
-    "Waiting for you to choose a document to open."
+    "Waiting for you to choose a document to open. Scanned PDFs can take a little longer because Phronon may need local OCR."
   );
 });
 
