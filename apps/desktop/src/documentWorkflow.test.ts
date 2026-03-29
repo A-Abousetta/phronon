@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildDocumentLoadStatusMessage,
+  buildReaderDocumentStatusMessage,
+  buildRecentDocumentButtonLabel,
   buildDocumentOpenFailureMessage,
   clampParagraphIndex,
   clampReadingSpeed,
@@ -132,5 +135,78 @@ test("buildDocumentOpenFailureMessage keeps the current document clear", () => {
       reason: "Phronon could not extract readable text from that PDF."
     }),
     "New Notes.pdf did not open. Phronon could not extract readable text from that PDF. Current Notes.txt is still open."
+  );
+});
+
+test("buildReaderDocumentStatusMessage reports the loaded file and position", () => {
+  assert.equal(
+    buildReaderDocumentStatusMessage({
+      filePath: "C:\\docs\\Biology Chapter 3.txt",
+      fileType: "txt",
+      currentParagraphIndex: 2,
+      paragraphCount: 8
+    }),
+    "Loaded text file: Biology Chapter 3.txt. Paragraph 3 of 8."
+  );
+});
+
+test("buildReaderDocumentStatusMessage keeps empty reader state clear", () => {
+  assert.equal(
+    buildReaderDocumentStatusMessage({
+      currentParagraphIndex: 0,
+      paragraphCount: 0
+    }),
+    "No document loaded. Paragraph 0 of 0."
+  );
+});
+
+test("buildReaderDocumentStatusMessage prefers the active load status when loading", () => {
+  assert.equal(
+    buildReaderDocumentStatusMessage({
+      isLoading: true,
+      loadingStatusMessage: "Restoring your last document: Notes.txt.",
+      filePath: "C:\\docs\\Current Notes.txt",
+      fileType: "txt",
+      currentParagraphIndex: 1,
+      paragraphCount: 4
+    }),
+    "Restoring your last document: Notes.txt."
+  );
+});
+
+test("buildRecentDocumentButtonLabel creates a screen-reader-friendly name", () => {
+  assert.equal(
+    buildRecentDocumentButtonLabel({
+      fileName: "Chemistry Notes.pdf",
+      filePath: "C:\\docs\\Chemistry Notes.pdf",
+      fileType: "pdf",
+      lastOpenedAt: 1000
+    }),
+    "Open recent PDF document Chemistry Notes.pdf"
+  );
+});
+
+test("buildDocumentLoadStatusMessage explains the active load operation", () => {
+  assert.equal(
+    buildDocumentLoadStatusMessage({
+      origin: "startupRestore",
+      filePath: "C:\\docs\\History Notes.txt"
+    }),
+    "Restoring your last document: History Notes.txt."
+  );
+
+  assert.equal(
+    buildDocumentLoadStatusMessage({
+      origin: "recentDocument",
+      filePath: "C:\\docs\\Chemistry.pdf"
+    }),
+    "Opening recent document: Chemistry.pdf."
+  );
+
+  assert.equal(
+    buildDocumentLoadStatusMessage({
+      origin: "filePicker"
+    }),
+    "Waiting for you to choose a document to open."
   );
 });

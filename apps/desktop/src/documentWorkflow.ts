@@ -23,6 +23,8 @@ export type ReaderPersistenceState = {
   lastOpenedParagraphIndex: number;
 };
 
+export type DocumentLoadOrigin = "startupRestore" | "filePicker" | "recentDocument";
+
 const READER_PERSISTENCE_KEY = "phronon.reader.persistence";
 const DEFAULT_READING_SPEED = 1;
 const MIN_READING_SPEED = 0.5;
@@ -95,6 +97,61 @@ export function buildDocumentOpenFailureMessage(options: {
     : " No document was replaced.";
 
   return `${attemptedFileName} did not open. ${reason}${currentDocumentMessage}`;
+}
+
+export function buildReaderDocumentStatusMessage(options: {
+  isLoading?: boolean;
+  loadingStatusMessage?: string | null;
+  error?: string | null;
+  filePath?: string | null;
+  fileType?: "txt" | "pdf" | null;
+  currentParagraphIndex: number;
+  paragraphCount: number;
+}) {
+  if (options.isLoading && options.loadingStatusMessage?.trim()) {
+    return options.loadingStatusMessage.trim();
+  }
+
+  if (options.error?.trim()) {
+    return options.error.trim();
+  }
+
+  if (!options.filePath) {
+    return "No document loaded. Paragraph 0 of 0.";
+  }
+
+  const fileName = getDocumentFileName(options.filePath);
+  const fileTypeLabel = options.fileType === "pdf" ? "PDF" : "text";
+  const safeParagraphCount = Math.max(0, options.paragraphCount);
+  const safeParagraphIndex =
+    safeParagraphCount > 0
+      ? Math.min(clampParagraphIndex(options.currentParagraphIndex) + 1, safeParagraphCount)
+      : 0;
+
+  return `Loaded ${fileTypeLabel} file: ${fileName}. Paragraph ${safeParagraphIndex} of ${safeParagraphCount}.`;
+}
+
+export function buildRecentDocumentButtonLabel(document: RecentDocument) {
+  return `Open recent ${document.fileType.toUpperCase()} document ${document.fileName}`;
+}
+
+export function buildDocumentLoadStatusMessage(options: {
+  origin: DocumentLoadOrigin;
+  filePath?: string | null;
+}) {
+  if (options.origin === "startupRestore") {
+    return options.filePath
+      ? `Restoring your last document: ${getDocumentFileName(options.filePath)}.`
+      : "Restoring your last document.";
+  }
+
+  if (options.origin === "recentDocument") {
+    return options.filePath
+      ? `Opening recent document: ${getDocumentFileName(options.filePath)}.`
+      : "Opening a recent document.";
+  }
+
+  return "Waiting for you to choose a document to open.";
 }
 
 export function upsertRecentDocument(
