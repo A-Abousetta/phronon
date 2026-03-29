@@ -76,6 +76,23 @@ export function createLoadedDocumentState(result: {
   };
 }
 
+export function buildDocumentOpenFailureMessage(options: {
+  attemptedFilePath?: string;
+  currentFilePath?: string | null;
+  reason?: string;
+}) {
+  const attemptedFileName = options.attemptedFilePath
+    ? getDocumentFileName(options.attemptedFilePath)
+    : "the selected document";
+  const currentFileName = options.currentFilePath ? getDocumentFileName(options.currentFilePath) : null;
+  const reason = options.reason?.trim() || "Phronon could not open that document.";
+  const currentDocumentMessage = currentFileName
+    ? ` ${currentFileName} is still open.`
+    : " No document was replaced.";
+
+  return `${attemptedFileName} did not open. ${reason}${currentDocumentMessage}`;
+}
+
 export function upsertRecentDocument(
   recentDocuments: RecentDocument[],
   documentState: {

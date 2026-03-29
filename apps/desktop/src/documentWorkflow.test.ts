@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildDocumentOpenFailureMessage,
   clampParagraphIndex,
   clampReadingSpeed,
   getDocumentFileName,
@@ -118,4 +119,15 @@ test("reading and paragraph clamps keep persisted values in range", () => {
   assert.equal(clampReadingSpeed(4), 2);
   assert.equal(clampParagraphIndex(-3), 0);
   assert.equal(clampParagraphIndex(7.9), 7);
+});
+
+test("buildDocumentOpenFailureMessage keeps the current document clear", () => {
+  assert.equal(
+    buildDocumentOpenFailureMessage({
+      attemptedFilePath: "C:\\docs\\New Notes.pdf",
+      currentFilePath: "C:\\docs\\Current Notes.txt",
+      reason: "Phronon could not extract readable text from that PDF."
+    }),
+    "New Notes.pdf did not open. Phronon could not extract readable text from that PDF. Current Notes.txt is still open."
+  );
 });

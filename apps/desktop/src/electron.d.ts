@@ -12,7 +12,7 @@ type OpenReaderDocumentResult =
   | {
       canceled: false;
       error: string;
-      filePath?: undefined;
+      filePath?: string | undefined;
       text?: undefined;
     };
 

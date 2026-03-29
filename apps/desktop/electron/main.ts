@@ -20,6 +20,9 @@ type PdfExtractionFailureReason =
   | "backend_error"
   | "file_not_found"
   | "no_text"
+  | "ocr_dependencies_missing"
+  | "ocr_failed"
+  | "ocr_no_text"
   | "read_error"
   | "unsupported_file";
 
@@ -87,6 +90,9 @@ function normalizeBackendReason(reason: string | undefined): PdfExtractionFailur
   switch (reason) {
     case "file_not_found":
     case "no_text":
+    case "ocr_dependencies_missing":
+    case "ocr_failed":
+    case "ocr_no_text":
     case "read_error":
     case "unsupported_file":
       return reason;
@@ -246,7 +252,8 @@ async function openDocumentFromPath(filePath: string) {
       if (!pdfResult.ok) {
         return {
           canceled: false,
-          error: pdfResult.error
+          error: pdfResult.error,
+          filePath
         };
       }
 
@@ -269,7 +276,8 @@ async function openDocumentFromPath(filePath: string) {
   } catch {
     return {
       canceled: false,
-      error: "Phronon could not read that document. Please choose a readable .txt or text-based .pdf file and try again."
+      error: "Phronon could not read that document. Please choose a readable .txt or .pdf file and try again.",
+      filePath
     };
   }
 }

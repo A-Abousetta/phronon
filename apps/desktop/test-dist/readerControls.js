@@ -25,10 +25,17 @@ export function splitParagraphIntoSpeechChunks(paragraph) {
     }
     return sentenceChunks.map((chunk) => chunk.trim()).filter(Boolean);
 }
-export function getReaderShortcutAction(input) {
+export function getAppShortcutAction(input) {
     const normalizedKey = input.key.toLowerCase();
     if (input.ctrlKey && !input.metaKey && !input.altKey && !input.shiftKey && normalizedKey === "o") {
-        return "open";
+        return "openDocument";
+    }
+    return null;
+}
+export function getReaderShortcutAction(input) {
+    const normalizedKey = input.key.toLowerCase();
+    if (getAppShortcutAction(input)) {
+        return null;
     }
     if (!input.ctrlKey && !input.metaKey && input.altKey && !input.shiftKey) {
         if (input.key === "ArrowUp" || input.code === "ArrowUp") {
