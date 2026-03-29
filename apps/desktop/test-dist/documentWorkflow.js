@@ -12,6 +12,7 @@ export const emptyReaderDocumentState = {
 export const defaultReaderPersistenceState = {
     recentDocuments: [],
     readingSpeed: DEFAULT_READING_SPEED,
+    speechVoicePreference: "automatic",
     lastOpenedDocumentPath: null,
     lastOpenedParagraphIndex: 0
 };
@@ -85,6 +86,7 @@ export function parseReaderPersistenceState(rawValue) {
         return {
             recentDocuments,
             readingSpeed: clampReadingSpeed(typeof parsed.readingSpeed === "number" ? parsed.readingSpeed : DEFAULT_READING_SPEED),
+            speechVoicePreference: parsed.speechVoicePreference === "default" ? "default" : "automatic",
             lastOpenedDocumentPath: typeof parsed.lastOpenedDocumentPath === "string" && parsed.lastOpenedDocumentPath.trim().length > 0
                 ? parsed.lastOpenedDocumentPath
                 : null,
