@@ -14,6 +14,8 @@
     "src/documentWorkflow.ts",
     "src/documentWorkflow.test.ts",
     "src/speechVoices.ts",
-    "src/speechVoices.test.ts"
+    "src/speechVoices.test.ts",
+    "src/voiceCommands.ts",
+    "src/voiceCommands.test.ts"
   ]
 }

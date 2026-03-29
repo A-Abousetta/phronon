@@ -79,6 +79,7 @@ npm run build
 - React UI for Home, Reader, and Settings
 - Reader support for opening and displaying local `.txt` files
 - Reader playback controls backed by local browser/Electron speech synthesis
+- Optional Reader voice commands for a small hands-free control set when local speech recognition is available
 - Minimal backend package layout for later document processing
 
 ## Reader document loading
@@ -98,6 +99,13 @@ When a document is loaded, Phronon also splits the extracted text into readable 
 
 ## Reader keyboard shortcuts
 Phronon supports a shared keyboard-first document open flow across the app. `Ctrl+O` opens the document picker from Home, Reader, or Settings. Reader-only controls stay scoped to the Reader screen: `Space` starts, pauses, or resumes reading from the current paragraph, `S` stops playback, `J` moves to the next paragraph, `K` moves to the previous paragraph, `R` repeats only the current paragraph, and `Alt+Up` or `Alt+Down` adjust the reading speed. These Reader shortcuts intentionally stay inactive while a form control such as the reading speed slider or a button has focus so normal keyboard behavior is preserved.
+
+## Reader voice commands
+Phronon now includes a minimal optional voice-command proof of concept for Reader control. The Reader shows a `Listen for command` button that starts one short listening session only when you press it. Phronon does not listen continuously, and the feature stays secondary to the existing keyboard and button controls.
+
+The supported English phrases are intentionally narrow: `open file`, `play`, `pause`, `stop`, `next paragraph`, `previous paragraph`, `repeat paragraph`, `faster`, and `slower`. Matching is exact apart from simple casing, spacing, or punctuation cleanup, so the app stays predictable and easy to maintain.
+
+If browser speech recognition is unavailable or microphone permission is denied, Phronon fails clearly with a status message and keeps all existing Reader controls working normally.
 
 ## Reader persistence
 The desktop app now keeps a small local reader snapshot in the Electron renderer so study context survives restarts without any cloud service or new dependency. Phronon remembers the recent documents list, the current reading speed, the selected speech voice mode, the last opened document path, and the last active paragraph for that document. If opening a new document fails, Phronon keeps the current document and paragraph position in place and explains that the attempted file did not open.
@@ -130,11 +138,13 @@ On launch, Phronon restores the recent documents list and reading speed immediat
 23. If local OCR dependencies are not installed, open a scanned PDF or an image-only PDF and confirm Phronon shows a clear message explaining which local OCR tools are missing.
 24. Move focus to the reading speed slider and press `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, or `Alt+Down`; confirm the shortcut does not fire and the focused control keeps its normal behavior.
 25. While playback is active, change the reading speed slider or press `Alt+Up` or `Alt+Down` and confirm the status says the new speed will apply on the next paragraph without restarting the current paragraph immediately.
-23. Pause playback, change the reading speed, press `Play`, and confirm playback resumes from the current paragraph at the new speed.
-24. With no file loaded, press `Play`, `Space`, or `R` and confirm the app shows a clear status message.
-25. Open a document, move to a later paragraph, change the reading speed, restart the app, and confirm the recent list and reading speed are restored.
-26. If the same document still exists, confirm it reopens and the highlighted paragraph returns to the saved position.
-27. Rename or remove the last opened file, restart the app, and confirm Phronon stays usable while showing a clear load failure.
+26. Pause playback, change the reading speed, press `Play`, and confirm playback resumes from the current paragraph at the new speed.
+27. With speech recognition support available, press `Listen for command`, say `play`, `pause`, `stop`, `next paragraph`, `previous paragraph`, `repeat paragraph`, `faster`, `slower`, and `open file`, and confirm each command maps to the same Reader behavior as the matching button or shortcut.
+28. If speech recognition support is unavailable or microphone permission is denied, confirm the Reader shows a clear message and no existing controls break.
+29. With no file loaded, press `Play`, `Space`, or `R` and confirm the app shows a clear status message.
+30. Open a document, move to a later paragraph, change the reading speed, restart the app, and confirm the recent list and reading speed are restored.
+31. If the same document still exists, confirm it reopens and the highlighted paragraph returns to the saved position.
+32. Rename or remove the last opened file, restart the app, and confirm Phronon stays usable while showing a clear load failure.
 
 ## Next steps
 - Add local text extraction pipeline
