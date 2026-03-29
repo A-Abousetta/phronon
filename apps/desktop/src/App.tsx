@@ -26,8 +26,12 @@ import {
   writeReaderPersistenceState
 } from "./documentWorkflow";
 import {
+  buildVoiceDiagnosticsSummary,
   chooseSpeechVoice,
   findArabicVoice,
+  findVoiceById,
+  getVoiceIdentifier,
+  getVoiceDisplayName,
   type SpeechVoicePreference
 } from "./speechVoices";
 
@@ -102,6 +106,11 @@ type ActiveDocumentLoad = {
   statusMessage: string;
 };
 
+type WelcomePanelProps = {
+  onOpenDocument: () => Promise<void>;
+  onDismiss: () => void;
+};
+
 const screens: Screen[] = [
   {
     id: "home",
@@ -161,6 +170,40 @@ function createActiveDocumentLoad(requestId: number, options?: LoadDocumentOptio
       filePath: options?.filePath
     })
   };
+}
+
+function WelcomePanel(props: WelcomePanelProps) {
+  const titleId = useId();
+  const tipsId = useId();
+
+  return (
+    <section className="welcome-panel" aria-labelledby={titleId} aria-describedby={tipsId}>
+      <div className="welcome-panel-header">
+        <div>
+          <p className="panel-kicker">Welcome</p>
+          <h2 id={titleId}>Phronon helps you open study text and start listening quickly.</h2>
+        </div>
+        <button type="button" className="secondary-button" onClick={props.onDismiss}>
+          Dismiss welcome
+        </button>
+      </div>
+      <p className="welcome-panel-text">
+        The first useful step is to open a TXT or PDF file. After that, move to Reader and press Play or Space to
+        start playback.
+      </p>
+      <div className="welcome-panel-actions">
+        <button type="button" className="primary-button" onClick={() => void props.onOpenDocument()}>
+          Open a document
+        </button>
+      </div>
+      <ul id={tipsId} className="simple-list welcome-panel-list" aria-label="Getting started tips">
+        <li>Open a file: press `Ctrl+O` anywhere, or use Import File on Home.</li>
+        <li>Start playback: in Reader, press `Play` or `Space`.</li>
+        <li>Move between paragraphs: press `J` for next and `K` for previous.</li>
+        <li>Adjust speed: press `Alt+Up` or `Alt+Down`, or use the speed slider.</li>
+      </ul>
+    </section>
+  );
 }
 
 function HomeScreen(props: {
@@ -277,6 +320,7 @@ function ReaderScreen(props: {
   playbackRate: number;
   onPlaybackRateChange: (nextRate: number) => void;
   speechVoicePreference: SpeechVoicePreference;
+  preferredVoiceId: string | null;
   focusRequest: number;
 }) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
@@ -364,7 +408,8 @@ function ReaderScreen(props: {
     const voiceChoice = chooseSpeechVoice({
       voices: props.availableVoices,
       text: currentChunk,
-      preference: props.speechVoicePreference
+      preference: props.speechVoicePreference,
+      preferredVoiceId: props.preferredVoiceId
     });
 
     if (voiceChoice.voice) {
@@ -734,7 +779,8 @@ function ReaderScreen(props: {
   const documentVoiceChoice = chooseSpeechVoice({
     voices: props.availableVoices,
     text: props.documentState.text,
-    preference: props.speechVoicePreference
+    preference: props.speechVoicePreference,
+    preferredVoiceId: props.preferredVoiceId
   });
   const voiceStatusMessage =
     !hasText || !speechSynthesisAvailable || !props.voicesInitialized ? null : documentVoiceChoice.warning;
@@ -956,22 +1002,31 @@ function SettingsScreen(props: {
   availableVoices: SpeechSynthesisVoice[];
   speechVoicePreference: SpeechVoicePreference;
   onSpeechVoicePreferenceChange: (nextPreference: SpeechVoicePreference) => void;
+  preferredVoiceId: string | null;
+  onPreferredVoiceIdChange: (nextVoiceId: string | null) => void;
   voicesInitialized: boolean;
 }) {
   const settingsTitleId = useId();
   const languageId = useId();
   const startupId = useId();
   const speechVoiceModeId = useId();
+  const speechVoiceId = useId();
   const voiceSummaryId = useId();
   const voiceModeHintId = useId();
+  const voicePickerHintId = useId();
+  const voiceFallbackId = useId();
+  const voiceListId = useId();
   const hasArabicVoice = findArabicVoice(props.availableVoices) !== null;
-  const voiceSummary = !props.voicesInitialized
-    ? "Checking available speech voices on this device."
-    : props.availableVoices.length === 0
-      ? "No speech voices were reported by the system yet."
-      : hasArabicVoice
-        ? `${props.availableVoices.length} speech voices detected, including Arabic support.`
-        : `${props.availableVoices.length} speech voices detected. No Arabic voice was reported.`;
+  const preferredVoice = findVoiceById(props.availableVoices, props.preferredVoiceId);
+  const voiceSummary = buildVoiceDiagnosticsSummary(props.availableVoices, props.voicesInitialized);
+  const fallbackVoice = chooseSpeechVoice({
+    voices: props.availableVoices,
+    text: null,
+    preference: props.speechVoicePreference,
+    preferredVoiceId: props.preferredVoiceId
+  });
+  const manualVoiceUnavailableMessage =
+    props.speechVoicePreference === "manual" && !preferredVoice ? fallbackVoice.warning : null;
 
   return (
     <section className="page-workspace" aria-labelledby={settingsTitleId}>
@@ -1017,13 +1072,18 @@ function SettingsScreen(props: {
                 value={props.speechVoicePreference}
                 onChange={(event) =>
                   props.onSpeechVoicePreferenceChange(
-                    event.target.value === "default" ? "default" : "automatic"
+                    event.target.value === "default"
+                      ? "default"
+                      : event.target.value === "manual"
+                        ? "manual"
+                        : "automatic"
                   )
                 }
                 aria-describedby={`${voiceSummaryId} ${voiceModeHintId}`}
               >
                 <option value="automatic">Automatic</option>
                 <option value="default">Always use default voice</option>
+                <option value="manual">Use selected voice</option>
               </select>
             </label>
           </div>
@@ -1033,6 +1093,74 @@ function SettingsScreen(props: {
           <p id={voiceModeHintId} className="hint">
             Automatic mode prefers an Arabic-capable voice for Arabic script and keeps the default voice for other text.
           </p>
+        </section>
+
+        <section className="panel-section" aria-labelledby="settings-voice-picker-title" aria-describedby={voiceSummaryId}>
+          <div className="panel-section-header">
+            <p className="panel-kicker">Voices</p>
+            <h3 id="settings-voice-picker-title">Voice diagnostics and picker</h3>
+            <p>Review detected voices, choose a manual playback voice if needed, and keep fallback behavior clear.</p>
+          </div>
+          <div className="form-grid" role="group" aria-label="Speech voice controls">
+            <label className="field" htmlFor={speechVoiceId}>
+              <span>Preferred playback voice</span>
+              <select
+                id={speechVoiceId}
+                value={props.preferredVoiceId ?? ""}
+                onChange={(event) =>
+                  props.onPreferredVoiceIdChange(event.target.value.trim() ? event.target.value : null)
+                }
+                disabled={props.availableVoices.length === 0}
+                aria-describedby={`${voicePickerHintId} ${voiceFallbackId}`}
+              >
+                <option value="">System default voice</option>
+                {props.availableVoices.map((voice) => (
+                  <option key={getVoiceIdentifier(voice)} value={getVoiceIdentifier(voice)}>
+                    {getVoiceDisplayName(voice)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p id={voicePickerHintId} className="hint">
+            Voice name and language come from the device. If metadata is incomplete, Phronon falls back to the safest available label.
+          </p>
+          <p id={voiceListId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+            {preferredVoice
+              ? `Selected voice: ${getVoiceDisplayName(preferredVoice)}.`
+              : "Selected voice: system default."}
+          </p>
+          {manualVoiceUnavailableMessage ? (
+            <p
+              id={voiceFallbackId}
+              className="status-message error-text compact-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {manualVoiceUnavailableMessage}
+            </p>
+          ) : (
+            <p id={voiceFallbackId} className="hint">
+              {props.speechVoicePreference === "manual"
+                ? "Manual mode uses the selected voice for all playback."
+                : hasArabicVoice
+                  ? "Automatic mode can switch between Arabic and non-Arabic voices when text changes."
+                  : "Automatic mode stays available even if this device does not report an Arabic voice."}
+            </p>
+          )}
+          {props.availableVoices.length > 0 ? (
+            <ul className="simple-list voice-diagnostics-list" aria-label="Detected speech voices">
+              {props.availableVoices.map((voice) => (
+                <li key={getVoiceIdentifier(voice)} className="voice-diagnostics-item">
+                  <span className="voice-diagnostics-name">{getVoiceDisplayName(voice)}</span>
+                  <span className="voice-diagnostics-meta">
+                    {voice.default ? "System default" : "Available voice"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
 
         <section className="panel-section" aria-labelledby="settings-accessibility-title">
@@ -1062,9 +1190,11 @@ export function App() {
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>(initialPersistenceState.recentDocuments);
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(initialPersistenceState.lastOpenedParagraphIndex);
   const [playbackRate, setPlaybackRate] = useState(initialPersistenceState.readingSpeed);
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState(initialPersistenceState.hasSeenOnboarding);
   const [speechVoicePreference, setSpeechVoicePreference] = useState<SpeechVoicePreference>(
     initialPersistenceState.speechVoicePreference
   );
+  const [preferredVoiceId, setPreferredVoiceId] = useState<string | null>(initialPersistenceState.preferredVoiceId);
   const [lastOpenedDocumentPath, setLastOpenedDocumentPath] = useState<string | null>(
     initialPersistenceState.lastOpenedDocumentPath
   );
@@ -1078,6 +1208,7 @@ export function App() {
   const [mainFocusRequest, setMainFocusRequest] = useState(0);
   const [readerFocusRequest, setReaderFocusRequest] = useState(0);
   const hasAttemptedStartupRestoreRef = useRef(false);
+  const hasAnnouncedOnboardingRef = useRef(false);
   const mainHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const currentDocumentStateRef = useRef(documentState);
   const activeLoadRef = useRef<ActiveDocumentLoad | null>(null);
@@ -1097,6 +1228,11 @@ export function App() {
 
   function focusReaderPanel() {
     setReaderFocusRequest((current) => current + 1);
+  }
+
+  function dismissOnboarding() {
+    setHasSeenOnboarding(true);
+    announce("Welcome guidance dismissed.");
   }
 
   function isActiveLoadRequest(request: ActiveDocumentLoad) {
@@ -1174,6 +1310,17 @@ export function App() {
   useEffect(() => {
     activeLoadRef.current = activeLoad;
   }, [activeLoad]);
+
+  useEffect(() => {
+    if (hasSeenOnboarding || hasAnnouncedOnboardingRef.current) {
+      return;
+    }
+
+    hasAnnouncedOnboardingRef.current = true;
+    announce(
+      "Welcome to Phronon. Open a TXT or PDF file to begin, then use Reader to play text, move between paragraphs, and adjust speed."
+    );
+  }, [hasSeenOnboarding]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
@@ -1364,16 +1511,20 @@ export function App() {
       recentDocuments,
       readingSpeed: clampReadingSpeed(playbackRate),
       speechVoicePreference,
+      preferredVoiceId,
       lastOpenedDocumentPath,
       lastOpenedParagraphIndex:
-        documentState.filePath && documentState.text ? clampParagraphIndex(currentParagraphIndex) : 0
+        documentState.filePath && documentState.text ? clampParagraphIndex(currentParagraphIndex) : 0,
+      hasSeenOnboarding
     });
   }, [
     currentParagraphIndex,
     documentState.filePath,
     documentState.text,
+    hasSeenOnboarding,
     lastOpenedDocumentPath,
     playbackRate,
+    preferredVoiceId,
     recentDocuments,
     speechVoicePreference
   ]);
@@ -1438,6 +1589,12 @@ export function App() {
         </nav>
 
         <main id="main-content" className="main-panel" aria-busy={documentState.isLoading}>
+          {!hasSeenOnboarding ? (
+            <WelcomePanel
+              onOpenDocument={() => loadDocument({ navigateToReader: true, origin: "filePicker" })}
+              onDismiss={dismissOnboarding}
+            />
+          ) : null}
           {activeScreen === "home" && (
             <HomeScreen
               documentState={documentState}
@@ -1461,6 +1618,7 @@ export function App() {
               playbackRate={playbackRate}
               onPlaybackRateChange={(nextRate) => setPlaybackRate(clampReadingSpeed(nextRate))}
               speechVoicePreference={speechVoicePreference}
+              preferredVoiceId={preferredVoiceId}
               focusRequest={readerFocusRequest}
             />
           )}
@@ -1469,6 +1627,8 @@ export function App() {
               availableVoices={availableVoices}
               speechVoicePreference={speechVoicePreference}
               onSpeechVoicePreferenceChange={setSpeechVoicePreference}
+              preferredVoiceId={preferredVoiceId}
+              onPreferredVoiceIdChange={setPreferredVoiceId}
               voicesInitialized={voicesInitialized}
             />
           )}
