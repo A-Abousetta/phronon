@@ -450,7 +450,8 @@ async function collectRuntimeSupportStatus(): Promise<RuntimeSupportStatus> {
       pdfSupportAvailable: true,
       ocrSupportAvailable: true,
       arabicOcrSupportAvailable: true,
-      message: "Core app, standard PDF reading, OCR, and Arabic OCR are ready on this device."
+      message:
+        "You can start right away with TXT files, standard PDFs, scanned PDFs, and Arabic OCR on this device."
     };
   }
 
@@ -461,7 +462,8 @@ async function collectRuntimeSupportStatus(): Promise<RuntimeSupportStatus> {
       pdfSupportAvailable: true,
       ocrSupportAvailable: true,
       arabicOcrSupportAvailable: false,
-      message: "Core app, standard PDF reading, and OCR are ready. Arabic OCR still needs Arabic Tesseract language data."
+      message:
+        "TXT files, standard PDFs, and scanned PDFs work now. Arabic OCR still needs the Arabic language data for Tesseract."
     };
   }
 
@@ -472,7 +474,7 @@ async function collectRuntimeSupportStatus(): Promise<RuntimeSupportStatus> {
     ocrSupportAvailable: false,
     arabicOcrSupportAvailable: false,
     message:
-      "Core app and standard PDF reading are ready in this release. OCR for scanned PDFs is optional and is not set up on this device yet."
+      "TXT files and standard text-based PDFs work right away. Scanned PDFs and Arabic OCR need optional local setup."
   };
 }
 
@@ -510,8 +512,8 @@ async function extractPdfText(filePath: string): Promise<PdfExtractionResult> {
       ok: false,
       reason: "backend_invocation_failed",
       error: app.isPackaged
-        ? "Phronon can already open standard PDFs in this release, but scanned PDFs need optional OCR tools. Install Python 3.11 or newer, pytesseract, pypdfium2, Pillow, and Tesseract OCR if you want OCR fallback."
-        : "Phronon could not find the local Python OCR backend. Standard PDFs still work, but scanned PDFs need the local OCR setup."
+        ? "This PDF looks scanned. Standard text-based PDFs already work, but scanned PDFs need optional local OCR. Install Python 3.11 or newer, pytesseract, pypdfium2, Pillow, and Tesseract OCR to add that support."
+        : "Phronon could not find the local OCR backend. Standard text-based PDFs still work, but scanned PDFs need the optional OCR setup."
     };
   }
 
@@ -585,8 +587,8 @@ async function extractPdfText(filePath: string): Promise<PdfExtractionResult> {
       ok: false,
       reason: "backend_invocation_failed",
       error: app.isPackaged
-        ? "Phronon could not start optional OCR for this PDF. Standard PDFs still work, but scanned PDFs need Python 3.11 or newer plus pytesseract, pypdfium2, Pillow, and Tesseract OCR."
-        : "Phronon could not start optional OCR for that PDF. Please make sure the local OCR backend is installed and try again."
+        ? "Phronon could not start optional OCR for this scanned PDF. Standard text-based PDFs still work, but scanned PDFs need Python 3.11 or newer, pytesseract, pypdfium2, Pillow, and Tesseract OCR."
+        : "Phronon could not start the optional OCR tools for that PDF. Please check the local OCR setup and try again."
     };
   }
 
