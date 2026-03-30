@@ -16,7 +16,7 @@
   --app-font-scale: 1;
   --reader-font-scale: 1;
   --reader-surface: #18211f;
-  --reader-paragraph-surface: rgba(21, 12, 16, 0.45);
+  --reader-paragraph-surface: #1d2826;
   --reader-current-surface: #2d433d;
   --reader-match-surface: rgba(255, 211, 107, 0.28);
   --reader-match-active-surface: #ffd36b;
@@ -382,14 +382,20 @@ select:disabled {
 
 .reader-workspace {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 0.9rem;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1rem;
   min-height: calc(100vh - 6.5rem);
+}
+
+.reader-top-band {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .reader-toolbar,
 .reader-bookmarks,
-.reader-playback-bar {
+.reader-playback-bar,
+.reader-search-panel {
   border: 1px solid var(--border);
   border-radius: 0.9rem;
   background: var(--surface);
@@ -397,14 +403,28 @@ select:disabled {
 
 .reader-toolbar {
   display: grid;
-  gap: 0.8rem;
-  padding: 0.9rem 1rem;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
 }
 
 .reader-bookmarks {
   display: grid;
-  gap: 0.8rem;
-  padding: 0.9rem 1rem;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  align-content: start;
+}
+
+.reader-utility-area {
+  display: grid;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.reader-secondary-tools {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.95fr) minmax(20rem, 1.1fr);
+  gap: 0.75rem;
+  padding: 0.75rem;
 }
 
 .reader-bookmarks-header {
@@ -424,7 +444,7 @@ select:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.85rem;
   flex-wrap: wrap;
 }
 
@@ -439,17 +459,29 @@ select:disabled {
 
 .reader-toolbar h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
+}
+
+.reader-tool-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.reader-tool-header h3 {
+  margin: 0;
+  font-size: 0.98rem;
 }
 
 .reader-meta {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.4rem;
 }
 
 .reader-file-name {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.98rem;
   font-weight: 600;
 }
 
@@ -462,20 +494,20 @@ select:disabled {
 .reader-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 2rem;
-  padding: 0.2rem 0.65rem;
+  min-height: 1.8rem;
+  padding: 0.18rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-muted);
   color: var(--text-muted);
-  font-size: 0.92rem;
+  font-size: 0.88rem;
 }
 
 .reader-panel {
   min-height: 18rem;
   padding: 1rem;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: 1rem;
   background: var(--reader-surface);
   overflow: auto;
 }
@@ -483,11 +515,11 @@ select:disabled {
 .reader-panel-expanded {
   min-height: 0;
   height: 100%;
-  padding: calc(1.15rem + ((var(--reader-font-scale) - 1) * 1rem));
-  border-radius: 1rem;
-  background:
-    linear-gradient(180deg, rgba(131, 185, 175, 0.05), rgba(131, 185, 175, 0)),
-    var(--reader-surface);
+  min-block-size: 26rem;
+  padding: calc(1.25rem + ((var(--reader-font-scale) - 1) * 1rem));
+  border-radius: 1.1rem;
+  background: var(--reader-surface);
+  box-shadow: inset 0 1px 0 rgba(131, 185, 175, 0.06);
 }
 
 .reader-panel:focus-visible {
@@ -497,11 +529,11 @@ select:disabled {
 
 .reader-text {
   display: grid;
-  gap: calc(0.95rem * var(--reader-font-scale));
+  gap: calc(0.9rem * var(--reader-font-scale));
   margin: 0;
-  max-width: min(100%, 82rem);
+  max-width: min(100%, 78rem);
   justify-items: center;
-  padding-inline: clamp(0rem, 1vw, 0.5rem);
+  padding-inline: clamp(0rem, 0.8vw, 0.35rem);
   font: inherit;
 }
 
@@ -511,10 +543,10 @@ select:disabled {
   padding: calc(0.95rem + ((var(--reader-font-scale) - 1) * 0.38rem))
     calc(1.15rem + ((var(--reader-font-scale) - 1) * 0.45rem))
     calc(1.05rem + ((var(--reader-font-scale) - 1) * 0.38rem));
-  border: 1px solid rgba(131, 185, 175, 0.16);
+  border: 1px solid rgba(131, 185, 175, 0.18);
   border-radius: 1rem;
   background: var(--reader-paragraph-surface);
-  box-shadow: 0 0.75rem 1.5rem rgba(0, 0, 0, 0.14);
+  box-shadow: 0 0.45rem 1rem rgba(0, 0, 0, 0.12);
 }
 
 .reader-paragraph + .reader-paragraph {
@@ -629,24 +661,30 @@ select:disabled {
 
 .reader-playback-bar {
   display: grid;
-  gap: 0.85rem;
+  gap: 0.7rem;
   align-items: start;
-  padding: 0.95rem 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.playback-row {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
 .playback-group {
   display: flex;
-  gap: 0.55rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
   align-items: center;
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.85rem;
-  background: rgba(36, 50, 47, 0.45);
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(131, 185, 175, 0.2);
+  border-radius: 0.75rem;
+  background: var(--surface-muted);
 }
 
 .playback-group button {
-  padding: 0.7rem 0.9rem;
+  padding: 0.55rem 0.75rem;
 }
 
 .playback-voice-group {
@@ -659,7 +697,7 @@ select:disabled {
 }
 
 .playback-group-primary {
-  background: linear-gradient(180deg, rgba(69, 119, 106, 0.2), rgba(56, 85, 78, 0.12));
+  background: rgba(69, 119, 106, 0.12);
 }
 
 .playback-primary-button {
@@ -670,31 +708,28 @@ select:disabled {
 
 .playback-secondary-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  gap: 0.85rem;
+  grid-template-columns: minmax(14rem, 18rem) minmax(14rem, 1fr);
+  gap: 0.65rem;
 }
 
 .playback-speed {
   align-self: stretch;
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.85rem;
-  background: rgba(36, 50, 47, 0.45);
+  padding: 0.6rem 0.7rem;
+  border: 1px solid rgba(131, 185, 175, 0.2);
+  border-radius: 0.75rem;
+  background: var(--surface-muted);
 }
 
 .reader-search-panel {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.55rem;
   align-content: start;
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.85rem;
-  background: rgba(36, 50, 47, 0.45);
+  padding: 0.85rem 0.95rem;
 }
 
 .reader-search-form {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .reader-search-field {
@@ -702,17 +737,17 @@ select:disabled {
 }
 
 .reader-search-field input {
-  padding: 0.7rem 0.85rem;
+  padding: 0.62rem 0.78rem;
 }
 
 .reader-search-actions {
   display: flex;
-  gap: 0.55rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
 }
 
 .reader-search-actions button {
-  padding: 0.7rem 0.9rem;
+  padding: 0.55rem 0.75rem;
 }
 
 .playback-speed-value {
@@ -763,7 +798,7 @@ select:disabled {
 
 .playback-readout {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.35rem;
 }
 
 .reader-shortcuts-note {
@@ -772,6 +807,13 @@ select:disabled {
 
 .bookmark-list {
   margin-top: 0.15rem;
+  max-height: 10rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.bookmark-note-field {
+  margin-top: 0.25rem;
 }
 
 .bookmark-list-item {
@@ -781,8 +823,8 @@ select:disabled {
 .bookmark-button {
   display: grid;
   width: 100%;
-  gap: 0.2rem;
-  padding: 0.8rem 0.9rem;
+  gap: 0.18rem;
+  padding: 0.65rem 0.75rem;
   text-align: left;
   border: 1px solid var(--border);
   border-radius: 0.75rem;
@@ -795,6 +837,10 @@ select:disabled {
 
 .bookmark-button-preview {
   color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.bookmark-button-note {
   font-size: 0.92rem;
 }
 
@@ -839,6 +885,8 @@ select:disabled {
   .page-columns,
   .app-header-inner,
   .app-header-copy,
+  .reader-utility-area,
+  .reader-secondary-tools,
   .reader-bookmarks-header,
   .reader-toolbar-main,
   .playback-secondary-row {

@@ -155,6 +155,8 @@ The desktop app now keeps a small local reader snapshot in the Electron renderer
 
 On launch, Phronon restores the recent documents list and reading speed immediately. If the last opened file can still be read, the app reopens it and restores the saved paragraph position. If the file has moved, been deleted, or cannot be reopened, Phronon fails softly by leaving the app usable and showing the normal loading error instead of blocking the interface.
 
+Bookmarks now stay lightweight study markers. Each saved paragraph can include one short optional note, and that note is stored in the same local Reader persistence snapshot so it survives restarts without changing the wider Reader workflow.
+
 ## Low-vision display controls
 Phronon now includes a small set of low-vision-friendly display controls in `Settings` without changing the main workflow. Users can increase general app text size, increase Reader text size separately, and switch to a stronger contrast mode that makes surfaces, borders, status cards, and the reading area easier to distinguish while keeping the same calm layout.
 
@@ -182,23 +184,26 @@ These preferences are local-first and persist across restarts. Keyboard shortcut
 19. Enter a word that appears in the current document, press `Search`, and confirm the Reader reports the total match count and jumps to a matching paragraph.
 20. Press `Next match` and `Previous match` and confirm the current paragraph moves to the expected result while bookmarks and paragraph navigation still work.
 21. Search for a word that is not present and confirm the Reader announces that no matches were found without changing the document text or playback controls.
-22. If local OCR dependencies are installed, open a scanned PDF or an image-only PDF and confirm Phronon extracts readable text through the same Reader view.
-23. Open a document containing Arabic text and confirm Phronon prefers an Arabic-capable voice when the system reports one.
-24. On a system without an Arabic speech voice, open Arabic text and confirm playback still starts while the Reader explains that Arabic playback may sound incorrect.
-25. Open `Settings`, switch `Speech voice mode` between `Automatic` and `Always use default voice`, and confirm the choice persists after restarting the app.
-26. If local OCR dependencies are not installed, open a scanned PDF or an image-only PDF and confirm Phronon shows a clear message explaining which local OCR tools are missing.
-27. Move focus to the reading speed slider and press `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, or `Alt+Down`; confirm the shortcut does not fire and the focused control keeps its normal behavior.
-28. While playback is active, change the reading speed slider or press `Alt+Up` or `Alt+Down` and confirm the status says the new speed will apply on the next paragraph without restarting the current paragraph immediately.
-29. Pause playback, change the reading speed, press `Play`, and confirm playback resumes from the current paragraph at the new speed.
-30. With speech recognition support available, press `Listen for command`, say `play`, `pause`, `stop`, `next paragraph`, `previous paragraph`, `repeat paragraph`, `faster`, `slower`, and `open file`, and confirm each command maps to the same Reader behavior as the matching button or shortcut.
-31. If speech recognition support is unavailable or microphone permission is denied, confirm the Reader shows a clear message and no existing controls break.
-32. With no file loaded, press `Play`, `Space`, or `R` and confirm the app shows a clear status message.
-33. Open a document, move to a later paragraph, change the reading speed, restart the app, and confirm the recent list and reading speed are restored.
-34. If the same document still exists, confirm it reopens and the highlighted paragraph returns to the saved position.
-35. Rename or remove the last opened file, restart the app, and confirm Phronon stays usable while showing a clear load failure.
-36. Open `Settings`, change `App text size`, `Reader text size`, and `Contrast`, then restart the app and confirm those display preferences persist.
-37. With larger Reader text enabled, confirm the Reader layout still wraps cleanly, the current paragraph highlight stays visible, and playback controls remain usable.
-38. With `Stronger contrast` enabled, confirm focus outlines, status regions, and the current paragraph are easier to distinguish without changing keyboard or playback behavior.
+22. Save a bookmark for the current paragraph, add a short note, and confirm the saved marker shows both the paragraph preview and the note.
+23. Jump to that saved bookmark, confirm the note is loaded back into the compact note field, update it, save again, and confirm the note text changes.
+24. Restart the app and confirm the bookmark note is still present for the same document.
+25. If local OCR dependencies are installed, open a scanned PDF or an image-only PDF and confirm Phronon extracts readable text through the same Reader view.
+26. Open a document containing Arabic text and confirm Phronon prefers an Arabic-capable voice when the system reports one.
+27. On a system without an Arabic speech voice, open Arabic text and confirm playback still starts while the Reader explains that Arabic playback may sound incorrect.
+28. Open `Settings`, switch `Speech voice mode` between `Automatic` and `Always use default voice`, and confirm the choice persists after restarting the app.
+29. If local OCR dependencies are not installed, open a scanned PDF or an image-only PDF and confirm Phronon shows a clear message explaining which local OCR tools are missing.
+30. Move focus to the reading speed slider and press `Space`, `S`, `J`, `K`, `R`, `Alt+Up`, or `Alt+Down`; confirm the shortcut does not fire and the focused control keeps its normal behavior.
+31. While playback is active, change the reading speed slider or press `Alt+Up` or `Alt+Down` and confirm the status says the new speed will apply on the next paragraph without restarting the current paragraph immediately.
+32. Pause playback, change the reading speed, press `Play`, and confirm playback resumes from the current paragraph at the new speed.
+33. With speech recognition support available, press `Listen for command`, say `play`, `pause`, `stop`, `next paragraph`, `previous paragraph`, `repeat paragraph`, `faster`, `slower`, and `open file`, and confirm each command maps to the same Reader behavior as the matching button or shortcut.
+34. If speech recognition support is unavailable or microphone permission is denied, confirm the Reader shows a clear message and no existing controls break.
+35. With no file loaded, press `Play`, `Space`, or `R` and confirm the app shows a clear status message.
+36. Open a document, move to a later paragraph, change the reading speed, restart the app, and confirm the recent list and reading speed are restored.
+37. If the same document still exists, confirm it reopens and the highlighted paragraph returns to the saved position.
+38. Rename or remove the last opened file, restart the app, and confirm Phronon stays usable while showing a clear load failure.
+39. Open `Settings`, change `App text size`, `Reader text size`, and `Contrast`, then restart the app and confirm those display preferences persist.
+40. With larger Reader text enabled, confirm the Reader layout still wraps cleanly, the current paragraph highlight stays visible, and playback controls remain usable.
+41. With `Stronger contrast` enabled, confirm focus outlines, status regions, and the current paragraph are easier to distinguish without changing keyboard or playback behavior.
 
 ## Next steps
 - Add local text extraction pipeline
