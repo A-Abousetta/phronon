@@ -184,6 +184,17 @@ function runTests() {
 
   assert.equal(
     getReaderShortcutAction({
+      key: "B",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: true
+    }),
+    "focusBookmarks"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
       key: "b",
       ctrlKey: false,
       metaKey: false,
@@ -202,6 +213,17 @@ function runTests() {
       shiftKey: true
     }),
     "previousBookmark"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "H",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: true
+    }),
+    "focusHighlights"
   );
 
   assert.equal(
@@ -298,6 +320,8 @@ function runTests() {
 
   assert.ok(appShortcutDefinitions.some((shortcut) => shortcut.action === "openDocument"));
   assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusSearch"));
+  assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusBookmarks"));
+  assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusHighlights"));
   assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "nextBookmark"));
 }
 

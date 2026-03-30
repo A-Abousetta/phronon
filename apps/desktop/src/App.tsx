@@ -661,9 +661,14 @@ function ReaderScreen(props: {
   const voiceRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const paragraphRefs = useRef<Array<HTMLElement | null>>([]);
   const searchMatchRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const bookmarkButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const highlightOpenButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const readerPanelRef = useRef<HTMLDivElement | null>(null);
   const openFileButtonRef = useRef<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const bookmarkNoteInputRef = useRef<HTMLInputElement | null>(null);
+  const highlightNoteInputRef = useRef<HTMLInputElement | null>(null);
+  const highlightSaveButtonRef = useRef<HTMLButtonElement | null>(null);
   const bookmarkSectionRef = useRef<HTMLElement | null>(null);
   const highlightSectionRef = useRef<HTMLElement | null>(null);
   const playbackRangeRef = useRef<PlaybackRange | null>(null);
@@ -720,7 +725,30 @@ function ReaderScreen(props: {
             ? `No matches found for "${activeSearchQuery}".`
             : activeSearchMatch
               ? `Match ${activeSearchMatchIndex + 1} of ${searchMatches.length} in paragraph ${activeSearchMatch.paragraphIndex + 1}. ${matchedParagraphCount} paragraph${matchedParagraphCount === 1 ? "" : "s"} contain ${matchedParagraphCount === 1 ? "this result" : "results"}.`
-              : `${searchMatches.length} matches found for "${activeSearchQuery}".`;
+            : `${searchMatches.length} matches found for "${activeSearchQuery}".`;
+
+  function focusParagraph(paragraphIndex: number) {
+    readerPanelRef.current?.focus();
+    paragraphRefs.current[paragraphIndex]?.focus();
+  }
+
+  function buildSearchResultAnnouncement(matchIndex: number, matches = searchMatches) {
+    const nextMatch = matches[matchIndex];
+
+    if (!nextMatch) {
+      return "There are no search results to move through yet.";
+    }
+
+    return `Search result ${matchIndex + 1} of ${matches.length} in paragraph ${nextMatch.paragraphIndex + 1}. Reader text focused.`;
+  }
+
+  function buildBookmarkAnnouncement(bookmark: ParagraphBookmark, bookmarkIndex: number) {
+    return `Bookmark ${bookmarkIndex + 1} of ${props.bookmarks.length} in paragraph ${bookmark.paragraphIndex + 1}. Reader text focused${bookmark.note ? ". Note loaded." : "."}`;
+  }
+
+  function buildHighlightAnnouncement(highlight: TextHighlight, highlightIndex: number) {
+    return `Highlight ${highlightIndex + 1} of ${props.highlights.length} in paragraph ${highlight.paragraphIndex + 1}. Reader text focused${highlight.note ? ". Note loaded." : "."}`;
+  }
 
   function stopVoiceCommandListening(message?: string) {
     const recognition = voiceRecognitionRef.current;
@@ -1096,12 +1124,12 @@ function ReaderScreen(props: {
     }
 
     if (hasText) {
-      readerPanelRef.current?.focus();
+      focusParagraph(props.currentParagraphIndex);
       return;
     }
 
     openFileButtonRef.current?.focus();
-  }, [hasText, props.focusRequest]);
+  }, [hasText, props.currentParagraphIndex, props.focusRequest]);
 
   async function handleOpenFile() {
     await props.onOpenDocument();
@@ -1363,6 +1391,78 @@ function ReaderScreen(props: {
     props.onAnnounce("Reader search focused.");
   }
 
+  function focusBookmarkTool() {
+    if (!hasText || !props.documentState.filePath) {
+      bookmarkSectionRef.current?.focus();
+      props.onAnnounce("Bookmarks will be available after a document is loaded.");
+      return;
+    }
+
+    const currentBookmarkIndex = props.bookmarks.findIndex(
+      (bookmark) => bookmark.paragraphIndex === props.currentParagraphIndex
+    );
+    const targetButton =
+      currentBookmarkIndex !== -1 ? bookmarkButtonRefs.current[currentBookmarkIndex] : null;
+
+    if (targetButton) {
+      targetButton.focus();
+      props.onAnnounce(
+        `Bookmarks focused. Current paragraph ${props.currentParagraphIndex + 1} already has a saved marker.`
+      );
+      return;
+    }
+
+    bookmarkNoteInputRef.current?.focus();
+    bookmarkNoteInputRef.current?.select();
+    props.onAnnounce(
+      props.bookmarks.length > 0
+        ? `Bookmarks focused. Add or update a note for paragraph ${props.currentParagraphIndex + 1}, or tab to saved markers.`
+        : `Bookmarks focused. No saved markers yet. You can save a marker for paragraph ${props.currentParagraphIndex + 1}.`
+    );
+  }
+
+  function focusHighlightTool() {
+    if (!hasText || !props.documentState.filePath) {
+      highlightSectionRef.current?.focus();
+      props.onAnnounce("Highlights will be available after a document is loaded.");
+      return;
+    }
+
+    const currentHighlightIndex = activeHighlightId
+      ? props.highlights.findIndex((highlight) => highlight.id === activeHighlightId)
+      : props.highlights.findIndex((highlight) => highlight.paragraphIndex === props.currentParagraphIndex);
+    const targetButton =
+      currentHighlightIndex !== -1 ? highlightOpenButtonRefs.current[currentHighlightIndex] : null;
+
+    if (targetButton) {
+      targetButton.focus();
+      props.onAnnounce(
+        `Highlights focused. Paragraph ${props.highlights[currentHighlightIndex].paragraphIndex + 1} is ready for review.`
+      );
+      return;
+    }
+
+    if ((selectedTextRange || activeHighlightId) && highlightNoteInputRef.current && !highlightNoteInputRef.current.disabled) {
+      highlightNoteInputRef.current.focus();
+      highlightNoteInputRef.current.select();
+      props.onAnnounce("Highlights focused. The highlight note field is ready.");
+      return;
+    }
+
+    if (selectedTextRange && highlightSaveButtonRef.current && !highlightSaveButtonRef.current.disabled) {
+      highlightSaveButtonRef.current.focus();
+      props.onAnnounce(`Highlights focused. Selected text in paragraph ${selectedTextRange.paragraphIndex + 1} is ready to save.`);
+      return;
+    }
+
+    highlightSectionRef.current?.focus();
+    props.onAnnounce(
+      props.highlights.length > 0
+        ? "Highlights focused. Tab to review saved highlights."
+        : "Highlights focused. Select text in the document to save a new highlight."
+    );
+  }
+
   function focusReaderTextRegion() {
     if (!hasText) {
       readerPanelRef.current?.focus();
@@ -1370,8 +1470,7 @@ function ReaderScreen(props: {
       return;
     }
 
-    readerPanelRef.current?.focus();
-    paragraphRefs.current[props.currentParagraphIndex]?.focus();
+    focusParagraph(props.currentParagraphIndex);
     props.onAnnounce(`Reader text focused at paragraph ${props.currentParagraphIndex + 1}.`);
   }
 
@@ -1395,11 +1494,7 @@ function ReaderScreen(props: {
       return;
     }
 
-    bookmarkSectionRef.current?.focus();
-    handleJumpToBookmark(nextBookmark);
-    props.onAnnounce(
-      `Moved to ${direction === "next" ? "next" : "previous"} bookmark at paragraph ${nextBookmark.paragraphIndex + 1}.`
-    );
+    handleJumpToBookmark(nextBookmark, nextBookmarkIndex);
   }
 
   function jumpToHighlightByShortcut(direction: "previous" | "next") {
@@ -1422,11 +1517,7 @@ function ReaderScreen(props: {
       return;
     }
 
-    highlightSectionRef.current?.focus();
-    handleJumpToHighlight(nextHighlight);
-    props.onAnnounce(
-      `Moved to ${direction === "next" ? "next" : "previous"} highlight at paragraph ${nextHighlight.paragraphIndex + 1}.`
-    );
+    handleJumpToHighlight(nextHighlight, nextHighlightIndex);
   }
 
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1466,7 +1557,7 @@ function ReaderScreen(props: {
     setActiveSearchMatchIndex(preferredMatchIndex);
     props.onCurrentParagraphIndexChange(nextMatches[preferredMatchIndex].paragraphIndex);
     props.onAnnounce(
-      `${nextMatches.length} search result${nextMatches.length === 1 ? "" : "s"} found. Starting at match ${preferredMatchIndex + 1}.`
+      `${nextMatches.length} search result${nextMatches.length === 1 ? "" : "s"} found. ${buildSearchResultAnnouncement(preferredMatchIndex, nextMatches)}`
     );
   }
 
@@ -1483,19 +1574,22 @@ function ReaderScreen(props: {
           : -1
         : activeSearchMatchIndex;
 
-    moveToSearchMatch(direction === "previous" ? currentIndex - 1 : currentIndex + 1);
-    props.onAnnounce(`Moved to the ${direction} search result.`);
+    const nextMatchIndex = direction === "previous" ? currentIndex - 1 : currentIndex + 1;
+    const safeMatchIndex = ((nextMatchIndex % searchMatches.length) + searchMatches.length) % searchMatches.length;
+
+    moveToSearchMatch(nextMatchIndex);
+    props.onAnnounce(buildSearchResultAnnouncement(safeMatchIndex));
   }
 
   useEffect(() => {
     function handleReaderKeydown(event: KeyboardEvent) {
-      if (isInteractiveElement(event.target)) {
-        return;
-      }
-
       const action = getReaderShortcutAction(event);
 
       if (!action) {
+        return;
+      }
+
+      if (isInteractiveElement(event.target) && action !== "focusReaderText") {
         return;
       }
 
@@ -1541,11 +1635,17 @@ function ReaderScreen(props: {
         case "saveBookmark":
           handleAddBookmark();
           return;
+        case "focusBookmarks":
+          focusBookmarkTool();
+          return;
         case "nextBookmark":
           jumpToBookmarkByShortcut("next");
           return;
         case "previousBookmark":
           jumpToBookmarkByShortcut("previous");
+          return;
+        case "focusHighlights":
+          focusHighlightTool();
           return;
         case "nextHighlight":
           jumpToHighlightByShortcut("next");
@@ -1575,7 +1675,9 @@ function ReaderScreen(props: {
     props.highlights,
     props.onAnnounce,
     props.onCurrentParagraphIndexChange,
-    searchMatches.length
+    props.documentState.filePath,
+    searchMatches.length,
+    selectedTextRange
   ]);
 
   const statusMessage = buildReaderDocumentStatusMessage({
@@ -1808,24 +1910,20 @@ function ReaderScreen(props: {
     props.onAnnounce(`Removed highlight from paragraph ${highlightToRemove.paragraphIndex + 1}.`);
   }
 
-  function handleJumpToBookmark(bookmark: ParagraphBookmark) {
+  function handleJumpToBookmark(bookmark: ParagraphBookmark, bookmarkIndex: number) {
     props.onCurrentParagraphIndexChange(bookmark.paragraphIndex);
-    paragraphRefs.current[bookmark.paragraphIndex]?.focus();
+    focusParagraph(bookmark.paragraphIndex);
     setBookmarkMessage(
       bookmark.note
         ? `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}. Note loaded for review.`
         : `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}.`
     );
-    props.onAnnounce(
-      bookmark.note
-        ? `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}. Note loaded.`
-        : `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}.`
-    );
+    props.onAnnounce(buildBookmarkAnnouncement(bookmark, bookmarkIndex));
   }
 
-  function handleJumpToHighlight(highlight: TextHighlight) {
+  function handleJumpToHighlight(highlight: TextHighlight, highlightIndex?: number) {
     props.onCurrentParagraphIndexChange(highlight.paragraphIndex);
-    paragraphRefs.current[highlight.paragraphIndex]?.focus();
+    focusParagraph(highlight.paragraphIndex);
     setActiveHighlightId(highlight.id);
     setSelectedTextRange(null);
     setHighlightNoteInputValue(highlight.note);
@@ -1834,10 +1932,12 @@ function ReaderScreen(props: {
         ? `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}. Note loaded for editing.`
         : `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}.`
     );
+    const resolvedHighlightIndex =
+      highlightIndex ?? props.highlights.findIndex((savedHighlight) => savedHighlight.id === highlight.id);
     props.onAnnounce(
-      highlight.note
-        ? `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}. Note loaded.`
-        : `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}.`
+      resolvedHighlightIndex === -1
+        ? `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}. Reader text focused${highlight.note ? ". Note loaded." : "."}`
+        : buildHighlightAnnouncement(highlight, resolvedHighlightIndex)
     );
   }
 
@@ -2014,8 +2114,8 @@ function ReaderScreen(props: {
               ) : null}
               <div id={shortcutsHintId} className="reader-shortcuts-compact">
                 <p className="hint reader-shortcuts-note">
-                  Keyboard: `Space` play or pause, `J` and `K` move by paragraph, `R` repeats, `Ctrl+F` searches, `M`
-                  saves a marker.
+                  Keyboard: `Space` play or pause, `J` and `K` move by paragraph, `Ctrl+F` opens search, `Ctrl+Shift+B`
+                  opens bookmarks, `Ctrl+Shift+H` opens highlights, and `Escape` returns to the document.
                 </p>
                 <details className="reader-shortcuts-details">
                   <summary id={shortcutsReferenceId} className="reader-shortcuts-summary">
@@ -2047,7 +2147,8 @@ function ReaderScreen(props: {
                       </div>
                     ))}
                     <p className="hint reader-shortcuts-note">
-                      Reader shortcuts only fire while focus is outside search, note fields, sliders, and other controls.
+                      Reader shortcuts stay inactive while you type in Reader controls, except `Escape`, which returns
+                      focus to the document text.
                     </p>
                     <p className="hint reader-shortcuts-note">
                       Full shortcut reference also stays available in `Settings`.
@@ -2115,6 +2216,7 @@ function ReaderScreen(props: {
               >
                 {searchStatusMessage}
               </p>
+              <p className="hint">Press `Escape` from the search field to return to the document text.</p>
             </section>
 
             <section
@@ -2130,6 +2232,7 @@ function ReaderScreen(props: {
                 </div>
                 <div className="reader-highlight-actions">
                   <button
+                    ref={highlightSaveButtonRef}
                     type="button"
                     onClick={handleSaveHighlight}
                     disabled={!hasText || !props.documentState.filePath || !selectedTextRange}
@@ -2152,6 +2255,7 @@ function ReaderScreen(props: {
               <label className="field bookmark-note-field" htmlFor={highlightNoteInputId}>
                 <span>Short note for this highlight</span>
                 <input
+                  ref={highlightNoteInputRef}
                   id={highlightNoteInputId}
                   type="text"
                   value={highlightNoteInputValue}
@@ -2164,10 +2268,11 @@ function ReaderScreen(props: {
               </label>
               <p id={highlightNoteHintId} className="hint">
                 Keep highlight notes short. Select text to save a new highlight, or load a saved one to edit its note.
+                Press `Escape` here to return to the document text.
               </p>
               {props.highlights.length > 0 ? (
                 <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
-                  {props.highlights.map((highlight) => (
+                  {props.highlights.map((highlight, highlightIndex) => (
                     <li key={highlight.id} className="bookmark-list-item highlight-list-item">
                       <div
                         className={
@@ -2175,9 +2280,12 @@ function ReaderScreen(props: {
                         }
                       >
                         <button
+                          ref={(element) => {
+                            highlightOpenButtonRefs.current[highlightIndex] = element;
+                          }}
                           type="button"
                           className="highlight-card-open"
-                          onClick={() => handleJumpToHighlight(highlight)}
+                          onClick={() => handleJumpToHighlight(highlight, highlightIndex)}
                           aria-controls={`reader-paragraph-${highlight.paragraphIndex}`}
                         >
                           <span className="bookmark-button-title">Paragraph {highlight.paragraphIndex + 1}</span>
@@ -2233,6 +2341,7 @@ function ReaderScreen(props: {
               <label className="field bookmark-note-field" htmlFor={bookmarkNoteInputId}>
                 <span>Short note for this bookmarked paragraph</span>
                 <input
+                  ref={bookmarkNoteInputRef}
                   id={bookmarkNoteInputId}
                   type="text"
                   value={bookmarkNoteInputValue}
@@ -2244,16 +2353,20 @@ function ReaderScreen(props: {
                 />
               </label>
               <p id={bookmarkNoteHintId} className="hint">
-                {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note.
+                {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note. Press `Escape`
+                here to return to the document text.
               </p>
               {props.bookmarks.length > 0 ? (
                 <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
-                  {props.bookmarks.map((bookmark) => (
+                  {props.bookmarks.map((bookmark, bookmarkIndex) => (
                     <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
                       <button
+                        ref={(element) => {
+                          bookmarkButtonRefs.current[bookmarkIndex] = element;
+                        }}
                         type="button"
                         className="bookmark-button"
-                        onClick={() => handleJumpToBookmark(bookmark)}
+                        onClick={() => handleJumpToBookmark(bookmark, bookmarkIndex)}
                         aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
                       >
                         <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
@@ -2347,8 +2460,8 @@ function ReaderScreen(props: {
             <p className="empty-state">Open a readable `.txt` or `.pdf` document to begin.</p>
             <p className="hint">Use `Open file` above or press `Ctrl+O`.</p>
             <p className="hint reader-empty-shortcuts">
-              Reader shortcuts center on a small map: `Space`, `S`, `J`, `K`, `R`, `Ctrl+F`, `F3`, `M`, `B`, `H`,
-              and `Alt+Up` or `Alt+Down`.
+              Reader shortcuts center on a small map: `Space`, `S`, `J`, `K`, `R`, `Ctrl+F`, `Ctrl+Shift+B`,
+              `Ctrl+Shift+H`, `F3`, `M`, `B`, `H`, `Escape`, and `Alt+Up` or `Alt+Down`.
             </p>
           </div>
         )}
@@ -2635,7 +2748,7 @@ function SettingsScreen(props: {
           ))}
           <p className="hint">
             Reader shortcuts stay inactive while you are typing in search, bookmark notes, highlight notes, sliders, or
-            other form controls.
+            other form controls. `Escape` is the one exception and returns focus to the document text.
           </p>
         </section>
 
