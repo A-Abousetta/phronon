@@ -7,7 +7,29 @@ export type ReaderShortcutAction =
   | "previousParagraph"
   | "repeatCurrentParagraph"
   | "increaseSpeed"
-  | "decreaseSpeed";
+  | "decreaseSpeed"
+  | "focusSearch"
+  | "nextSearchMatch"
+  | "previousSearchMatch"
+  | "saveBookmark"
+  | "nextBookmark"
+  | "previousBookmark"
+  | "nextHighlight"
+  | "previousHighlight"
+  | "focusReaderText";
+
+export type ShortcutScope = "global" | "reader";
+
+export type ShortcutTypingBehavior = "allowWhileTyping" | "ignoreWhileTyping";
+
+export type ShortcutDefinition<Action extends string> = {
+  action: Action;
+  keys: string;
+  description: string;
+  groupLabel: string;
+  scope: ShortcutScope;
+  typingBehavior: ShortcutTypingBehavior;
+};
 
 export type ParagraphSearchMatch = {
   paragraphIndex: number;
@@ -28,8 +50,151 @@ const plainReaderShortcutMap: Record<string, Exclude<ReaderShortcutAction, "togg
   j: "nextParagraph",
   k: "previousParagraph",
   r: "repeatCurrentParagraph",
-  s: "stop"
+  s: "stop",
+  m: "saveBookmark"
 };
+
+export const appShortcutDefinitions: ShortcutDefinition<AppShortcutAction>[] = [
+  {
+    action: "openDocument",
+    keys: "Ctrl+O",
+    description: "Open a document from anywhere in the app.",
+    groupLabel: "Global",
+    scope: "global",
+    typingBehavior: "ignoreWhileTyping"
+  }
+];
+
+export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>[] = [
+  {
+    action: "togglePlayPause",
+    keys: "Space",
+    description: "Play, pause, or resume reading.",
+    groupLabel: "Reading",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "stop",
+    keys: "S",
+    description: "Stop playback.",
+    groupLabel: "Reading",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "nextParagraph",
+    keys: "J",
+    description: "Move to the next paragraph.",
+    groupLabel: "Reading",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "previousParagraph",
+    keys: "K",
+    description: "Move to the previous paragraph.",
+    groupLabel: "Reading",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "repeatCurrentParagraph",
+    keys: "R",
+    description: "Repeat the current paragraph.",
+    groupLabel: "Reading",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "increaseSpeed",
+    keys: "Alt+Up",
+    description: "Increase playback speed.",
+    groupLabel: "Reading",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "decreaseSpeed",
+    keys: "Alt+Down",
+    description: "Decrease playback speed.",
+    groupLabel: "Reading",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "focusSearch",
+    keys: "Ctrl+F or /",
+    description: "Focus the Reader search box.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "nextSearchMatch",
+    keys: "F3",
+    description: "Jump to the next search result.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "previousSearchMatch",
+    keys: "Shift+F3",
+    description: "Jump to the previous search result.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "saveBookmark",
+    keys: "M",
+    description: "Save or update a marker for the current paragraph.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "nextBookmark",
+    keys: "B",
+    description: "Jump to the next saved bookmark.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "previousBookmark",
+    keys: "Shift+B",
+    description: "Jump to the previous saved bookmark.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "nextHighlight",
+    keys: "H",
+    description: "Jump to the next saved highlight.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "previousHighlight",
+    keys: "Shift+H",
+    description: "Jump to the previous saved highlight.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "focusReaderText",
+    keys: "Escape",
+    description: "Return focus to the document text region.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  }
+];
 
 function normalizeLine(line: string) {
   return line.replace(/\s+/g, " ").trim();
@@ -263,6 +428,46 @@ export function getReaderShortcutAction(input: ReaderShortcutInput): ReaderShort
 
   if (getAppShortcutAction(input)) {
     return null;
+  }
+
+  if (input.ctrlKey && !input.metaKey && !input.altKey && !input.shiftKey && normalizedKey === "f") {
+    return "focusSearch";
+  }
+
+  if (!input.ctrlKey && !input.metaKey && !input.altKey && input.shiftKey) {
+    if (input.key === "F3" || input.code === "F3") {
+      return "previousSearchMatch";
+    }
+
+    if (normalizedKey === "b") {
+      return "previousBookmark";
+    }
+
+    if (normalizedKey === "h") {
+      return "previousHighlight";
+    }
+  }
+
+  if (!input.ctrlKey && !input.metaKey && !input.altKey && !input.shiftKey) {
+    if (input.key === "F3" || input.code === "F3") {
+      return "nextSearchMatch";
+    }
+
+    if (input.key === "/" || input.code === "Slash") {
+      return "focusSearch";
+    }
+
+    if (input.key === "Escape" || input.code === "Escape") {
+      return "focusReaderText";
+    }
+
+    if (normalizedKey === "b") {
+      return "nextBookmark";
+    }
+
+    if (normalizedKey === "h") {
+      return "nextHighlight";
+    }
   }
 
   if (!input.ctrlKey && !input.metaKey && input.altKey && !input.shiftKey) {

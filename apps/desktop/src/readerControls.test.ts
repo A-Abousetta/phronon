@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 
 import {
+  appShortcutDefinitions,
   findParagraphSearchMatches,
   getAppShortcutAction,
   getReaderShortcutAction,
+  readerShortcutDefinitions,
   splitIntoParagraphs,
   splitParagraphIntoSpeechChunks
 } from "./readerControls.js";
@@ -136,6 +138,120 @@ function runTests() {
 
   assert.equal(
     getReaderShortcutAction({
+      key: "f",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusSearch"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "F3",
+      code: "F3",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "nextSearchMatch"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "F3",
+      code: "F3",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: true
+    }),
+    "previousSearchMatch"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "m",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "saveBookmark"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "b",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "nextBookmark"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "B",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: true
+    }),
+    "previousBookmark"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "h",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "nextHighlight"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "H",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: true
+    }),
+    "previousHighlight"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "/",
+      code: "Slash",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusSearch"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "Escape",
+      code: "Escape",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusReaderText"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
       key: "ArrowUp",
       code: "ArrowUp",
       ctrlKey: false,
@@ -179,6 +295,10 @@ function runTests() {
     }),
     null
   );
+
+  assert.ok(appShortcutDefinitions.some((shortcut) => shortcut.action === "openDocument"));
+  assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusSearch"));
+  assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "nextBookmark"));
 }
 
 runTests();
