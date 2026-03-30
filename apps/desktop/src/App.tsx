@@ -18,17 +18,23 @@ import {
   clampParagraphIndex,
   clampReadingSpeed,
   createParagraphBookmark,
+  createTextHighlight,
   createLoadedDocumentState,
   defaultReaderPersistenceState,
   emptyReaderDocumentState,
   getBookmarksForDocument,
   getDocumentFileName,
+  getHighlightsForDocument,
   MAX_BOOKMARK_NOTE_LENGTH,
+  MAX_HIGHLIGHT_NOTE_LENGTH,
   normalizeBookmarkNote,
+  normalizeHighlightNote,
+  normalizeHighlightSelectionText,
   parseContrastMode,
   parseInterfaceTextScale,
   parseReaderTextScale,
   readReaderPersistenceState,
+  removeTextHighlight,
   type ContrastMode,
   type InterfaceTextScale,
   type ParagraphBookmark,
@@ -36,7 +42,9 @@ import {
   type ReaderTextScale,
   type ReaderDocumentState,
   type RecentDocument,
+  type TextHighlight,
   upsertParagraphBookmark,
+  upsertTextHighlight,
   upsertRecentDocument,
   writeReaderPersistenceState
 } from "./documentWorkflow";
@@ -133,6 +141,21 @@ type ActiveDocumentLoad = {
 
 type IndexedParagraphSearchMatch = ParagraphSearchMatch & {
   matchIndex: number;
+};
+
+type ReaderTextSelection = {
+  paragraphIndex: number;
+  selectedText: string;
+  startOffset: number;
+  endOffset: number;
+};
+
+type HighlightRenderSegment = {
+  startIndex: number;
+  endIndex: number;
+  text: string;
+  highlight: TextHighlight | null;
+  searchMatch: IndexedParagraphSearchMatch | null;
 };
 
 type WelcomePanelProps = {
@@ -234,6 +257,168 @@ function groupSearchMatchesByParagraph(matches: ParagraphSearchMatch[]) {
   });
 
   return matchesByParagraph;
+}
+
+function groupHighlightsByParagraph(highlights: TextHighlight[]) {
+  const highlightsByParagraph = new Map<number, TextHighlight[]>();
+
+  highlights.forEach((highlight) => {
+    const paragraphHighlights = highlightsByParagraph.get(highlight.paragraphIndex) ?? [];
+    paragraphHighlights.push(highlight);
+    highlightsByParagraph.set(highlight.paragraphIndex, paragraphHighlights);
+  });
+
+  highlightsByParagraph.forEach((paragraphHighlights) => {
+    paragraphHighlights.sort((left, right) => {
+      if (left.startOffset !== right.startOffset) {
+        return left.startOffset - right.startOffset;
+      }
+
+      return left.endOffset - right.endOffset;
+    });
+  });
+
+  return highlightsByParagraph;
+}
+
+function resolveParagraphTextOffset(container: HTMLElement, targetNode: Node, targetOffset: number) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let totalOffset = 0;
+  let currentNode = walker.nextNode();
+
+  while (currentNode) {
+    const currentTextNode = currentNode as Text;
+    const currentLength = currentTextNode.data.length;
+
+    if (currentTextNode === targetNode) {
+      return totalOffset + Math.min(Math.max(targetOffset, 0), currentLength);
+    }
+
+    totalOffset += currentLength;
+    currentNode = walker.nextNode();
+  }
+
+  return totalOffset;
+}
+
+function getSelectionInsideParagraph(selection: Selection | null): ReaderTextSelection | null {
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  const selectedText = normalizeHighlightSelectionText(selection.toString());
+
+  if (!selectedText) {
+    return null;
+  }
+
+  const startContainer =
+    range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  const endContainer =
+    range.endContainer.nodeType === Node.ELEMENT_NODE ? range.endContainer : range.endContainer.parentElement;
+  const startParagraphBody =
+    startContainer instanceof Element ? startContainer.closest<HTMLElement>("[data-reader-paragraph-body='true']") : null;
+  const endParagraphBody =
+    endContainer instanceof Element ? endContainer.closest<HTMLElement>("[data-reader-paragraph-body='true']") : null;
+
+  if (!startParagraphBody || !endParagraphBody || startParagraphBody !== endParagraphBody) {
+    return null;
+  }
+
+  const paragraphIndex = Number(startParagraphBody.dataset.paragraphIndex);
+
+  if (!Number.isFinite(paragraphIndex)) {
+    return null;
+  }
+
+  const startOffset = resolveParagraphTextOffset(startParagraphBody, range.startContainer, range.startOffset);
+  const endOffset = resolveParagraphTextOffset(startParagraphBody, range.endContainer, range.endOffset);
+  const safeStartOffset = Math.min(startOffset, endOffset);
+  const safeEndOffset = Math.max(startOffset, endOffset);
+
+  if (safeEndOffset <= safeStartOffset) {
+    return null;
+  }
+
+  return {
+    paragraphIndex,
+    selectedText,
+    startOffset: safeStartOffset,
+    endOffset: safeEndOffset
+  };
+}
+
+function selectionTouchesReader(selection: Selection | null) {
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  const startContainer =
+    range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  const endContainer =
+    range.endContainer.nodeType === Node.ELEMENT_NODE ? range.endContainer : range.endContainer.parentElement;
+  const startInsideReader =
+    startContainer instanceof Element ? startContainer.closest("[data-reader-paragraph-body='true']") !== null : false;
+  const endInsideReader =
+    endContainer instanceof Element ? endContainer.closest("[data-reader-paragraph-body='true']") !== null : false;
+
+  return startInsideReader || endInsideReader;
+}
+
+function buildParagraphRenderSegments(
+  paragraph: string,
+  paragraphHighlights: TextHighlight[],
+  paragraphMatches: IndexedParagraphSearchMatch[]
+) {
+  const boundaries = new Set<number>([0, paragraph.length]);
+
+  paragraphHighlights.forEach((highlight) => {
+    boundaries.add(Math.min(Math.max(highlight.startOffset, 0), paragraph.length));
+    boundaries.add(Math.min(Math.max(highlight.endOffset, 0), paragraph.length));
+  });
+
+  paragraphMatches.forEach((match) => {
+    boundaries.add(Math.min(Math.max(match.startIndex, 0), paragraph.length));
+    boundaries.add(Math.min(Math.max(match.endIndex, 0), paragraph.length));
+  });
+
+  const orderedBoundaries = Array.from(boundaries).sort((left, right) => left - right);
+  const segments: HighlightRenderSegment[] = [];
+
+  for (let index = 0; index < orderedBoundaries.length - 1; index += 1) {
+    const startIndex = orderedBoundaries[index];
+    const endIndex = orderedBoundaries[index + 1];
+
+    if (endIndex <= startIndex) {
+      continue;
+    }
+
+    const text = paragraph.slice(startIndex, endIndex);
+
+    if (!text) {
+      continue;
+    }
+
+    segments.push({
+      startIndex,
+      endIndex,
+      text,
+      highlight:
+        paragraphHighlights.find(
+          (highlight) => highlight.startOffset <= startIndex && highlight.endOffset >= endIndex
+        ) ?? null,
+      searchMatch:
+        paragraphMatches.find((match) => match.startIndex <= startIndex && match.endIndex >= endIndex) ?? null
+    });
+  }
+
+  return segments;
 }
 
 function WelcomePanel(props: WelcomePanelProps) {
@@ -385,9 +570,12 @@ function ReaderScreen(props: {
   documentState: ReaderDocumentState;
   activeLoad: ActiveDocumentLoad | null;
   bookmarks: ParagraphBookmark[];
+  highlights: TextHighlight[];
   currentParagraphIndex: number;
   onCurrentParagraphIndexChange: (nextIndex: number) => void;
   onAddBookmark: (paragraphIndex: number, paragraphText: string, noteText: string) => void;
+  onUpsertHighlight: (highlight: TextHighlight) => void;
+  onRemoveHighlight: (highlightId: string) => void;
   onOpenDocument: () => Promise<void>;
   availableVoices: SpeechSynthesisVoice[];
   voicesInitialized: boolean;
@@ -406,6 +594,10 @@ function ReaderScreen(props: {
   const [activeSearchQuery, setActiveSearchQuery] = useState("");
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
   const [bookmarkNoteInputValue, setBookmarkNoteInputValue] = useState("");
+  const [highlightMessage, setHighlightMessage] = useState("No highlights saved for this document yet.");
+  const [highlightNoteInputValue, setHighlightNoteInputValue] = useState("");
+  const [selectedTextRange, setSelectedTextRange] = useState<ReaderTextSelection | null>(null);
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voiceRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const paragraphRefs = useRef<Array<HTMLElement | null>>([]);
@@ -435,12 +627,16 @@ function ReaderScreen(props: {
   const searchStatusId = useId();
   const bookmarkNoteInputId = useId();
   const bookmarkNoteHintId = useId();
+  const highlightStatusId = useId();
+  const highlightNoteInputId = useId();
+  const highlightNoteHintId = useId();
   const paragraphs = splitIntoParagraphs(props.documentState.text);
   const searchMatches = useMemo(
     () => findParagraphSearchMatches(paragraphs, activeSearchQuery),
     [paragraphs, activeSearchQuery]
   );
   const searchMatchesByParagraph = useMemo(() => groupSearchMatchesByParagraph(searchMatches), [searchMatches]);
+  const highlightsByParagraph = useMemo(() => groupHighlightsByParagraph(props.highlights), [props.highlights]);
   const hasText = Boolean(props.documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
   const isFilePickerLoading = props.activeLoad?.origin === "filePicker";
@@ -483,42 +679,73 @@ function ReaderScreen(props: {
   }
 
   function renderParagraphText(paragraph: string, paragraphIndex: number) {
-    const paragraphMatches = searchMatchesByParagraph.get(paragraphIndex);
+    const paragraphMatches = searchMatchesByParagraph.get(paragraphIndex) ?? [];
+    const paragraphHighlights = highlightsByParagraph.get(paragraphIndex) ?? [];
 
-    if (!paragraphMatches || paragraphMatches.length === 0) {
+    if (paragraphMatches.length === 0 && paragraphHighlights.length === 0) {
       return paragraph;
     }
 
-    const renderedParts: ReactNode[] = [];
-    let currentIndex = 0;
+    return buildParagraphRenderSegments(paragraph, paragraphHighlights, paragraphMatches).map((segment) => {
+      const isActiveMatch = segment.searchMatch?.matchIndex === activeSearchMatchIndex;
+      const isActiveHighlight = segment.highlight?.id === activeHighlightId;
+      const className = [
+        segment.highlight ? "reader-inline-highlight" : "",
+        isActiveHighlight ? "reader-inline-highlight-active" : "",
+        segment.searchMatch ? "reader-search-match" : "",
+        isActiveMatch ? "reader-search-match-active" : ""
+      ]
+        .filter(Boolean)
+        .join(" ");
 
-    paragraphMatches.forEach((match) => {
-      if (match.startIndex > currentIndex) {
-        renderedParts.push(paragraph.slice(currentIndex, match.startIndex));
+      if (!className) {
+        return segment.text;
       }
 
-      const isActiveMatch = match.matchIndex === activeSearchMatchIndex;
-
-      renderedParts.push(
-        <mark
-          key={`search-match-${paragraphIndex}-${match.matchIndex}`}
+      return (
+        <span
+          key={`paragraph-${paragraphIndex}-segment-${segment.startIndex}-${segment.endIndex}`}
           ref={(element) => {
-            searchMatchRefs.current[match.matchIndex] = element;
+            if (element instanceof HTMLSpanElement && segment.searchMatch) {
+              searchMatchRefs.current[segment.searchMatch.matchIndex] = element;
+            }
           }}
-          className={isActiveMatch ? "reader-search-match reader-search-match-active" : "reader-search-match"}
+          className={className}
+          role={segment.highlight ? "button" : undefined}
+          tabIndex={segment.highlight ? 0 : undefined}
+          aria-label={
+            segment.highlight
+              ? `Highlight in paragraph ${paragraphIndex + 1}${segment.highlight.note ? `. Note: ${segment.highlight.note}` : ""}`
+              : undefined
+          }
+          onClick={
+            segment.highlight
+              ? () => {
+                  setActiveHighlightId(segment.highlight!.id);
+                  setSelectedTextRange(null);
+                  setHighlightNoteInputValue(segment.highlight!.note);
+                  setHighlightMessage(`Loaded highlight from paragraph ${segment.highlight!.paragraphIndex + 1}.`);
+                }
+              : undefined
+          }
+          onKeyDown={
+            segment.highlight
+              ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setActiveHighlightId(segment.highlight!.id);
+                    setSelectedTextRange(null);
+                    setHighlightNoteInputValue(segment.highlight!.note);
+                    setHighlightMessage(`Loaded highlight from paragraph ${segment.highlight!.paragraphIndex + 1}.`);
+                  }
+                }
+              : undefined
+          }
         >
-          {paragraph.slice(match.startIndex, match.endIndex)}
-        </mark>
+          {segment.text}
+        </span>
       );
-
-      currentIndex = match.endIndex;
     });
-
-    if (currentIndex < paragraph.length) {
-      renderedParts.push(paragraph.slice(currentIndex));
-    }
-
-    return renderedParts;
   }
 
   useEffect(() => {
@@ -728,6 +955,9 @@ function ReaderScreen(props: {
     setActiveSearchMatchIndex(-1);
     searchMatchRefs.current = [];
     shouldFocusSearchMatchRef.current = false;
+    setSelectedTextRange(null);
+    setActiveHighlightId(null);
+    setHighlightNoteInputValue("");
   }, [props.documentState.filePath, props.documentState.text]);
 
   useEffect(() => {
@@ -1198,13 +1428,33 @@ function ReaderScreen(props: {
     : null;
   const currentBookmark =
     props.bookmarks.find((bookmark) => bookmark.paragraphIndex === props.currentParagraphIndex) ?? null;
+  const activeHighlight = props.highlights.find((highlight) => highlight.id === activeHighlightId) ?? null;
+  const selectedExistingHighlight =
+    selectedTextRange
+      ? props.highlights.find(
+          (highlight) =>
+            highlight.paragraphIndex === selectedTextRange.paragraphIndex &&
+            highlight.startOffset === selectedTextRange.startOffset &&
+            highlight.endOffset === selectedTextRange.endOffset &&
+            highlight.selectedText === selectedTextRange.selectedText
+        ) ?? null
+      : null;
   const bookmarkActionLabel = currentBookmark ? "Update marker" : "Save marker";
+  const highlightActionLabel = selectedExistingHighlight ? "Update highlight" : "Save highlight";
   const bookmarkNoteStatus =
     currentBookmark?.note
       ? "This bookmarked paragraph already has a saved note."
       : currentBookmark
         ? "This paragraph is bookmarked. Add a short note or leave it blank."
         : "Saving a marker here can include a short optional note.";
+  const highlightStatusText = !hasText
+    ? "Open a document to add a highlight."
+    : selectedTextRange
+      ? `Selected text in paragraph ${selectedTextRange.paragraphIndex + 1}: ${selectedTextRange.selectedText}`
+      : activeHighlight
+        ? `Selected saved highlight in paragraph ${activeHighlight.paragraphIndex + 1}: ${activeHighlight.selectedText}`
+        : "Select a word or short phrase in the Reader text, then save it as a highlight.";
+  const selectedParagraphIndex = selectedTextRange?.paragraphIndex ?? null;
 
   useEffect(() => {
     setBookmarkMessage(
@@ -1215,8 +1465,30 @@ function ReaderScreen(props: {
   }, [props.bookmarks.length, props.documentState.filePath]);
 
   useEffect(() => {
+    setHighlightMessage(
+      props.highlights.length > 0
+        ? `${props.highlights.length} highlight${props.highlights.length === 1 ? "" : "s"} saved for this document.`
+        : "No highlights saved for this document yet."
+    );
+  }, [props.highlights.length, props.documentState.filePath]);
+
+  useEffect(() => {
     setBookmarkNoteInputValue(currentBookmark?.note ?? "");
   }, [currentBookmark?.note, props.currentParagraphIndex, props.documentState.filePath]);
+
+  useEffect(() => {
+    if (!activeHighlightId) {
+      return;
+    }
+
+    if (!activeHighlight) {
+      setActiveHighlightId(null);
+      setHighlightNoteInputValue("");
+      return;
+    }
+
+    setHighlightNoteInputValue(activeHighlight.note);
+  }, [activeHighlight, activeHighlightId]);
 
   function handleAddBookmark() {
     const currentParagraph = paragraphs[props.currentParagraphIndex];
@@ -1237,12 +1509,116 @@ function ReaderScreen(props: {
     );
   }
 
+  function captureSelectedTextRange() {
+    const browserSelection = window.getSelection();
+    const nextSelection = getSelectionInsideParagraph(browserSelection);
+
+    if (!nextSelection) {
+      if (selectionTouchesReader(browserSelection)) {
+        setSelectedTextRange(null);
+      }
+      return;
+    }
+
+    setSelectedTextRange(nextSelection);
+    setActiveHighlightId(null);
+
+    const matchingHighlight =
+      props.highlights.find(
+        (highlight) =>
+          highlight.paragraphIndex === nextSelection.paragraphIndex &&
+          highlight.startOffset === nextSelection.startOffset &&
+          highlight.endOffset === nextSelection.endOffset &&
+          highlight.selectedText === nextSelection.selectedText
+      ) ?? null;
+
+    setHighlightNoteInputValue(matchingHighlight?.note ?? "");
+    setHighlightMessage(
+      matchingHighlight
+        ? `Selected an existing highlight in paragraph ${nextSelection.paragraphIndex + 1}.`
+        : `Selected text in paragraph ${nextSelection.paragraphIndex + 1}. Add an optional note and save the highlight.`
+    );
+  }
+
+  function clearBrowserSelection() {
+    window.getSelection()?.removeAllRanges();
+  }
+
+  function clearPendingHighlightSelection() {
+    setSelectedTextRange(null);
+    clearBrowserSelection();
+    setHighlightMessage("Text selection cleared. You can still manage saved highlights below.");
+  }
+
+  function handleSaveHighlight() {
+    if (!props.documentState.filePath || !selectedTextRange) {
+      setHighlightMessage("Select text in the Reader before saving a highlight.");
+      return;
+    }
+
+    const paragraphText = paragraphs[selectedTextRange.paragraphIndex];
+
+    if (!paragraphText) {
+      setHighlightMessage("That selection is no longer available.");
+      return;
+    }
+
+    const nextHighlight = createTextHighlight({
+      documentPath: props.documentState.filePath,
+      paragraphIndex: selectedTextRange.paragraphIndex,
+      paragraphText,
+      selectedText: selectedTextRange.selectedText,
+      startOffset: selectedTextRange.startOffset,
+      endOffset: selectedTextRange.endOffset,
+      noteText: normalizeHighlightNote(highlightNoteInputValue)
+    });
+
+    props.onUpsertHighlight(nextHighlight);
+    setActiveHighlightId(nextHighlight.id);
+    setSelectedTextRange(null);
+    setHighlightNoteInputValue(nextHighlight.note);
+    clearBrowserSelection();
+    setHighlightMessage(
+      nextHighlight.note
+        ? `Saved highlight and note for paragraph ${nextHighlight.paragraphIndex + 1}.`
+        : `Saved highlight for paragraph ${nextHighlight.paragraphIndex + 1}.`
+    );
+  }
+
+  function handleRemoveHighlight() {
+    const highlightToRemove = activeHighlight ?? selectedExistingHighlight;
+
+    if (!highlightToRemove) {
+      setHighlightMessage("Choose a saved highlight before removing it.");
+      return;
+    }
+
+    props.onRemoveHighlight(highlightToRemove.id);
+    setActiveHighlightId(null);
+    setSelectedTextRange(null);
+    setHighlightNoteInputValue("");
+    clearBrowserSelection();
+    setHighlightMessage(`Removed highlight from paragraph ${highlightToRemove.paragraphIndex + 1}.`);
+  }
+
   function handleJumpToBookmark(bookmark: ParagraphBookmark) {
     props.onCurrentParagraphIndexChange(bookmark.paragraphIndex);
     setBookmarkMessage(
       bookmark.note
         ? `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}. Note loaded for review.`
         : `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}.`
+    );
+  }
+
+  function handleJumpToHighlight(highlight: TextHighlight) {
+    props.onCurrentParagraphIndexChange(highlight.paragraphIndex);
+    setActiveHighlightId(highlight.id);
+    setSelectedTextRange(null);
+    setHighlightNoteInputValue(highlight.note);
+    setHighlightMessage(
+      highlight.note
+        ? `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}. Note loaded for editing.`
+        : `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}.`
     );
   }
 
@@ -1483,6 +1859,92 @@ function ReaderScreen(props: {
               </p>
             </section>
 
+            <section className="reader-highlights" aria-labelledby="reader-highlights-title">
+              <div className="reader-bookmarks-header">
+                <div>
+                  <p className="reader-toolbar-label">Highlights</p>
+                  <h3 id="reader-highlights-title">Short text highlights</h3>
+                </div>
+                <div className="reader-highlight-actions">
+                  <button
+                    type="button"
+                    onClick={handleSaveHighlight}
+                    disabled={!hasText || !props.documentState.filePath || !selectedTextRange}
+                  >
+                    {highlightActionLabel}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRemoveHighlight}
+                    disabled={!activeHighlight && !selectedExistingHighlight}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <p id={highlightStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                {highlightMessage}
+              </p>
+              <p className="hint">{highlightStatusText}</p>
+              <label className="field bookmark-note-field" htmlFor={highlightNoteInputId}>
+                <span>Short note for this highlight</span>
+                <input
+                  id={highlightNoteInputId}
+                  type="text"
+                  value={highlightNoteInputValue}
+                  onChange={(event) => setHighlightNoteInputValue(event.target.value)}
+                  maxLength={MAX_HIGHLIGHT_NOTE_LENGTH}
+                  placeholder="Optional note"
+                  disabled={!hasText || (!selectedTextRange && !activeHighlight)}
+                  aria-describedby={highlightNoteHintId}
+                />
+              </label>
+              <p id={highlightNoteHintId} className="hint">
+                Keep highlight notes short. Select text to save a new highlight, or load a saved one to edit its note.
+              </p>
+              {props.highlights.length > 0 ? (
+                <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
+                  {props.highlights.map((highlight) => (
+                    <li key={highlight.id} className="bookmark-list-item highlight-list-item">
+                      <div
+                        className={
+                          highlight.id === activeHighlightId ? "bookmark-button highlight-card highlight-card-active" : "bookmark-button highlight-card"
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="highlight-card-open"
+                          onClick={() => handleJumpToHighlight(highlight)}
+                          aria-controls={`reader-paragraph-${highlight.paragraphIndex}`}
+                        >
+                          <span className="bookmark-button-title">Paragraph {highlight.paragraphIndex + 1}</span>
+                          <span className="bookmark-button-preview">{highlight.previewText}</span>
+                          {highlight.note ? <span className="bookmark-button-note">Note: {highlight.note}</span> : null}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button highlight-card-remove"
+                          onClick={() => {
+                            setActiveHighlightId(highlight.id);
+                            setHighlightNoteInputValue(highlight.note);
+                            props.onRemoveHighlight(highlight.id);
+                            setActiveHighlightId(null);
+                            setSelectedTextRange(null);
+                            clearBrowserSelection();
+                            setHighlightMessage(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="hint">Highlights will appear here after you select text and save one.</p>
+              )}
+            </section>
+
             <section className="reader-bookmarks" aria-labelledby="reader-bookmarks-title">
               <div className="reader-bookmarks-header">
                 <div>
@@ -1547,6 +2009,8 @@ function ReaderScreen(props: {
         role="region"
         aria-labelledby={documentRegionTitleId}
         aria-describedby={`${documentRegionHintId} ${positionStatusId}`}
+        onMouseUp={captureSelectedTextRange}
+        onKeyUp={captureSelectedTextRange}
       >
         <h3 id={documentRegionTitleId} className="visually-hidden">
           Document text
@@ -1567,6 +2031,7 @@ function ReaderScreen(props: {
                 className={[
                   "reader-paragraph",
                   index === props.currentParagraphIndex ? "current-paragraph" : "",
+                  selectedParagraphIndex === index ? "reader-paragraph-selection-active" : "",
                   searchMatchesByParagraph.has(index) ? "reader-paragraph-has-match" : "",
                   activeSearchMatch?.paragraphIndex === index ? "reader-paragraph-active-match" : ""
                 ]
@@ -1578,7 +2043,32 @@ function ReaderScreen(props: {
                 aria-label={`Paragraph ${index + 1}`}
               >
                 <span className="reader-paragraph-meta">Paragraph {index + 1}</span>
-                <p className="reader-paragraph-body">{renderParagraphText(paragraph, index)}</p>
+                <p className="reader-paragraph-body" data-reader-paragraph-body="true" data-paragraph-index={index}>
+                  {renderParagraphText(paragraph, index)}
+                </p>
+                {selectedTextRange && selectedTextRange.paragraphIndex === index ? (
+                  <div className="reader-selection-actions" role="group" aria-label={`Selected text actions for paragraph ${index + 1}`}>
+                    <p className="reader-selection-preview">
+                      Selected: <strong>{selectedTextRange.selectedText}</strong>
+                    </p>
+                    <div className="reader-selection-action-row">
+                      <button
+                        type="button"
+                        className="primary-button reader-selection-save"
+                        onClick={handleSaveHighlight}
+                        disabled={!props.documentState.filePath}
+                      >
+                        {highlightActionLabel}
+                      </button>
+                      <button type="button" className="secondary-button" onClick={clearPendingHighlightSelection}>
+                        Clear selection
+                      </button>
+                    </div>
+                    <p className="hint reader-selection-hint">
+                      Save now to highlight this text immediately. You can edit or remove notes later in the highlights panel.
+                    </p>
+                  </div>
+                ) : null}
               </article>
             ))}
           </div>
@@ -1871,6 +2361,9 @@ export function App() {
   const [bookmarksByDocument, setBookmarksByDocument] = useState<Record<string, ParagraphBookmark[]>>(
     initialPersistenceState.bookmarksByDocument
   );
+  const [highlightsByDocument, setHighlightsByDocument] = useState<Record<string, TextHighlight[]>>(
+    initialPersistenceState.highlightsByDocument
+  );
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(initialPersistenceState.lastOpenedParagraphIndex);
   const [playbackRate, setPlaybackRate] = useState(initialPersistenceState.readingSpeed);
   const [interfaceTextScale, setInterfaceTextScale] = useState<InterfaceTextScale>(
@@ -1952,6 +2445,34 @@ export function App() {
         ? `Bookmark and note saved for paragraph ${paragraphIndex + 1}.`
         : `Bookmark saved for paragraph ${paragraphIndex + 1}.`
     );
+  }
+
+  function handleUpsertHighlight(nextHighlight: TextHighlight) {
+    setHighlightsByDocument((current) => ({
+      ...current,
+      [nextHighlight.documentPath]: upsertTextHighlight(
+        getHighlightsForDocument(current, nextHighlight.documentPath),
+        nextHighlight
+      )
+    }));
+
+    announce(
+      nextHighlight.note
+        ? `Highlight and note saved for paragraph ${nextHighlight.paragraphIndex + 1}.`
+        : `Highlight saved for paragraph ${nextHighlight.paragraphIndex + 1}.`
+    );
+  }
+
+  function handleRemoveHighlight(highlightId: string) {
+    if (!documentState.filePath) {
+      return;
+    }
+
+    setHighlightsByDocument((current) => ({
+      ...current,
+      [documentState.filePath!]: removeTextHighlight(getHighlightsForDocument(current, documentState.filePath), highlightId)
+    }));
+    announce("Highlight removed.");
   }
 
   function isActiveLoadRequest(request: ActiveDocumentLoad) {
@@ -2262,6 +2783,7 @@ export function App() {
     writeReaderPersistenceState(typeof window === "undefined" ? undefined : window.localStorage, {
       recentDocuments,
       bookmarksByDocument,
+      highlightsByDocument,
       readingSpeed: clampReadingSpeed(playbackRate),
       interfaceTextScale,
       readerTextScale,
@@ -2280,6 +2802,7 @@ export function App() {
     documentState.filePath,
     documentState.text,
     hasSeenOnboarding,
+    highlightsByDocument,
     interfaceTextScale,
     lastOpenedDocumentPath,
     playbackRate,
@@ -2375,9 +2898,12 @@ export function App() {
               documentState={documentState}
               activeLoad={activeLoad}
               bookmarks={getBookmarksForDocument(bookmarksByDocument, documentState.filePath)}
+              highlights={getHighlightsForDocument(highlightsByDocument, documentState.filePath)}
               currentParagraphIndex={currentParagraphIndex}
               onCurrentParagraphIndexChange={(nextIndex) => setCurrentParagraphIndex(clampParagraphIndex(nextIndex))}
               onAddBookmark={handleAddBookmark}
+              onUpsertHighlight={handleUpsertHighlight}
+              onRemoveHighlight={handleRemoveHighlight}
               onOpenDocument={() => loadDocument({ origin: "filePicker" })}
               availableVoices={availableVoices}
               voicesInitialized={voicesInitialized}
