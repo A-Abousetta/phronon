@@ -18,6 +18,9 @@
   --reader-surface: #18211f;
   --reader-paragraph-surface: rgba(21, 12, 16, 0.45);
   --reader-current-surface: #2d433d;
+  --reader-match-surface: rgba(255, 211, 107, 0.28);
+  --reader-match-active-surface: #ffd36b;
+  --reader-match-active-text: #1a1a12;
   --status-surface: var(--surface-muted);
 }
 
@@ -112,6 +115,9 @@ select:disabled {
   --reader-surface: #0c1614;
   --reader-paragraph-surface: #132421;
   --reader-current-surface: #21433d;
+  --reader-match-surface: rgba(255, 215, 120, 0.34);
+  --reader-match-active-surface: #ffe08a;
+  --reader-match-active-text: #101008;
   --status-surface: #19332d;
 }
 
@@ -477,7 +483,7 @@ select:disabled {
 .reader-panel-expanded {
   min-height: 0;
   height: 100%;
-  padding: calc(1.2rem + ((var(--reader-font-scale) - 1) * 1rem));
+  padding: calc(1.15rem + ((var(--reader-font-scale) - 1) * 1rem));
   border-radius: 1rem;
   background:
     linear-gradient(180deg, rgba(131, 185, 175, 0.05), rgba(131, 185, 175, 0)),
@@ -491,34 +497,78 @@ select:disabled {
 
 .reader-text {
   display: grid;
-  gap: calc(1.15rem * var(--reader-font-scale));
+  gap: calc(0.95rem * var(--reader-font-scale));
   margin: 0;
+  max-width: min(100%, 82rem);
+  justify-items: center;
+  padding-inline: clamp(0rem, 1vw, 0.5rem);
   font: inherit;
 }
 
 .reader-paragraph {
   margin: 0;
-  max-width: calc(74ch - ((var(--reader-font-scale) - 1) * 10ch));
-  padding: calc(0.95rem + ((var(--reader-font-scale) - 1) * 0.35rem))
-    calc(1.1rem + ((var(--reader-font-scale) - 1) * 0.4rem))
-    calc(1rem + ((var(--reader-font-scale) - 1) * 0.35rem));
-  border-radius: 0.85rem;
-  font-size: calc(1.08rem * var(--reader-font-scale));
-  line-height: calc(1.85 - ((var(--reader-font-scale) - 1) * 0.18));
-  letter-spacing: 0.01em;
-  white-space: pre-wrap;
-  word-break: break-word;
+  max-width: min(100%, calc(76ch + ((var(--reader-font-scale) - 1) * 4ch)));
+  padding: calc(0.95rem + ((var(--reader-font-scale) - 1) * 0.38rem))
+    calc(1.15rem + ((var(--reader-font-scale) - 1) * 0.45rem))
+    calc(1.05rem + ((var(--reader-font-scale) - 1) * 0.38rem));
+  border: 1px solid rgba(131, 185, 175, 0.16);
+  border-radius: 1rem;
   background: var(--reader-paragraph-surface);
+  box-shadow: 0 0.75rem 1.5rem rgba(0, 0, 0, 0.14);
 }
 
 .reader-paragraph + .reader-paragraph {
   margin-top: 0;
 }
 
+.reader-paragraph-meta {
+  display: inline-flex;
+  margin-bottom: 0.55rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.reader-paragraph-body {
+  margin: 0;
+  max-width: min(100%, calc(68ch + ((var(--reader-font-scale) - 1) * 4ch)));
+  font-size: calc(1.08rem * var(--reader-font-scale));
+  line-height: calc(1.9 - ((var(--reader-font-scale) - 1) * 0.14));
+  letter-spacing: 0.01em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-wrap: pretty;
+}
+
+.reader-paragraph-has-match {
+  border-color: rgba(255, 211, 107, 0.32);
+}
+
+.reader-paragraph-active-match {
+  border-color: rgba(255, 211, 107, 0.7);
+}
+
 .current-paragraph {
   background: var(--reader-current-surface);
   border-inline-start: 0.35rem solid var(--primary);
-  box-shadow: inset 0 0 0 1px rgba(131, 185, 175, 0.35);
+  box-shadow:
+    inset 0 0 0 1px rgba(131, 185, 175, 0.35),
+    0 0 0 0.15rem rgba(92, 160, 143, 0.12);
+}
+
+.reader-search-match {
+  padding: 0.02em 0.1em;
+  border-radius: 0.24rem;
+  background: var(--reader-match-surface);
+  color: inherit;
+}
+
+.reader-search-match-active {
+  background: var(--reader-match-active-surface);
+  color: var(--reader-match-active-text);
+  box-shadow: 0 0 0 2px rgba(255, 211, 107, 0.3);
 }
 
 .reader-empty-state {
@@ -630,6 +680,39 @@ select:disabled {
   border: 1px solid var(--border);
   border-radius: 0.85rem;
   background: rgba(36, 50, 47, 0.45);
+}
+
+.reader-search-panel {
+  display: grid;
+  gap: 0.6rem;
+  align-content: start;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: rgba(36, 50, 47, 0.45);
+}
+
+.reader-search-form {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.reader-search-field {
+  gap: 0.35rem;
+}
+
+.reader-search-field input {
+  padding: 0.7rem 0.85rem;
+}
+
+.reader-search-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.reader-search-actions button {
+  padding: 0.7rem 0.9rem;
 }
 
 .playback-speed-value {

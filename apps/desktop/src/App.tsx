@@ -1,11 +1,13 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
 import {
+  findParagraphSearchMatches,
   getAppShortcutAction,
   getReaderShortcutAction,
   isInteractiveElement,
   splitIntoParagraphs,
-  splitParagraphIntoSpeechChunks
+  splitParagraphIntoSpeechChunks,
+  type ParagraphSearchMatch
 } from "./readerControls";
 import {
   buildBookmarkPreviewText,
@@ -127,6 +129,10 @@ type ActiveDocumentLoad = {
   statusMessage: string;
 };
 
+type IndexedParagraphSearchMatch = ParagraphSearchMatch & {
+  matchIndex: number;
+};
+
 type WelcomePanelProps = {
   onOpenDocument: () => Promise<void>;
   onDismiss: () => void;
@@ -206,6 +212,28 @@ function createActiveDocumentLoad(requestId: number, options?: LoadDocumentOptio
   };
 }
 
+function getNearestSearchMatchIndex(matches: ParagraphSearchMatch[], currentParagraphIndex: number) {
+  const matchIndex = matches.findIndex((match) => match.paragraphIndex >= currentParagraphIndex);
+
+  return matchIndex === -1 ? 0 : matchIndex;
+}
+
+function groupSearchMatchesByParagraph(matches: ParagraphSearchMatch[]) {
+  const matchesByParagraph = new Map<number, IndexedParagraphSearchMatch[]>();
+
+  matches.forEach((match, matchIndex) => {
+    const paragraphMatches = matchesByParagraph.get(match.paragraphIndex) ?? [];
+
+    paragraphMatches.push({
+      ...match,
+      matchIndex
+    });
+    matchesByParagraph.set(match.paragraphIndex, paragraphMatches);
+  });
+
+  return matchesByParagraph;
+}
+
 function WelcomePanel(props: WelcomePanelProps) {
   const titleId = useId();
   const tipsId = useId();
@@ -216,20 +244,20 @@ function WelcomePanel(props: WelcomePanelProps) {
       <div className="welcome-panel-header">
         <div>
           <p className="panel-kicker">Welcome</p>
-          <h2 id={titleId}>Phronon helps you open study text and start listening quickly.</h2>
+          <h2 id={titleId}>Phronon is ready to help you open study text and start listening.</h2>
         </div>
         <button type="button" className="secondary-button" onClick={props.onDismiss}>
           Dismiss welcome
         </button>
       </div>
       <p className="welcome-panel-text">
-        The first useful step is to open a TXT or PDF file. After that, move to Reader and press Play or Space to
-        start playback.
+        You can start right away with TXT files and standard text-based PDFs. Open a file, then go to Reader and press
+        Play or Space to start listening.
       </p>
       <p id={setupId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
         {props.runtimeSupportStatus
           ? props.runtimeSupportStatus.message
-          : "Checking local PDF and OCR support for this device."}
+          : "Checking what already works and what may need extra setup on this device."}
       </p>
       <div className="welcome-panel-actions">
         <button type="button" className="primary-button" onClick={() => void props.onOpenDocument()}>
@@ -238,6 +266,8 @@ function WelcomePanel(props: WelcomePanelProps) {
       </div>
       <ul id={tipsId} className="simple-list welcome-panel-list" aria-label="Getting started tips">
         <li>Open a file: press `Ctrl+O` anywhere, or use Import File on Home.</li>
+        <li>Scanned PDFs use optional OCR. Arabic OCR and Arabic voices may need extra setup.</li>
+        <li>Open `Settings` to review this device status in the Setup diagnostics section.</li>
         <li>Start playback: in Reader, press `Play` or `Space`.</li>
         <li>Move between paragraphs: press `J` for next and `K` for previous.</li>
         <li>Adjust speed: press `Alt+Up` or `Alt+Down`, or use the speed slider.</li>
@@ -370,17 +400,23 @@ function ReaderScreen(props: {
   const [bookmarkMessage, setBookmarkMessage] = useState("No bookmarks saved for this document yet.");
   const [voiceCommandMessage, setVoiceCommandMessage] = useState("");
   const [isListeningForVoiceCommand, setIsListeningForVoiceCommand] = useState(false);
+  const [searchInputValue, setSearchInputValue] = useState("");
+  const [activeSearchQuery, setActiveSearchQuery] = useState("");
+  const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voiceRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
-  const paragraphRefs = useRef<Array<HTMLParagraphElement | null>>([]);
+  const paragraphRefs = useRef<Array<HTMLElement | null>>([]);
+  const searchMatchRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const readerPanelRef = useRef<HTMLDivElement | null>(null);
   const openFileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const playbackRangeRef = useRef<PlaybackRange | null>(null);
   const playbackPositionRef = useRef<PlaybackPosition | null>(null);
   const playbackSessionRef = useRef(0);
   const playbackStateRef = useRef<PlaybackState>("idle");
   const playbackRateRef = useRef(props.playbackRate);
   const restartPausedParagraphRef = useRef(false);
+  const shouldFocusSearchMatchRef = useRef(false);
   const headingId = useId();
   const summaryTitleId = useId();
   const statusId = useId();
@@ -391,12 +427,37 @@ function ReaderScreen(props: {
   const speedInputId = useId();
   const speedValueId = useId();
   const voiceCommandStatusId = useId();
+  const searchInputId = useId();
+  const searchLabelId = useId();
+  const searchStatusId = useId();
   const paragraphs = splitIntoParagraphs(props.documentState.text);
+  const searchMatches = useMemo(
+    () => findParagraphSearchMatches(paragraphs, activeSearchQuery),
+    [paragraphs, activeSearchQuery]
+  );
+  const searchMatchesByParagraph = useMemo(() => groupSearchMatchesByParagraph(searchMatches), [searchMatches]);
   const hasText = Boolean(props.documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
   const isFilePickerLoading = props.activeLoad?.origin === "filePicker";
   const voiceRecognitionAvailability = getVoiceRecognitionAvailability(window);
   const voiceRecognitionAvailable = voiceRecognitionAvailability.available;
+  const activeSearchMatch =
+    activeSearchMatchIndex >= 0 && activeSearchMatchIndex < searchMatches.length
+      ? searchMatches[activeSearchMatchIndex]
+      : null;
+  const matchedParagraphCount = searchMatchesByParagraph.size;
+  const searchStatusMessage =
+    props.documentState.isLoading
+      ? "Search will be available when the document finishes loading."
+      : !hasText
+        ? "Open a document to search inside it."
+        : !activeSearchQuery
+          ? "Enter text and press Search to look inside the current document."
+          : searchMatches.length === 0
+            ? `No matches found for "${activeSearchQuery}".`
+            : activeSearchMatch
+              ? `Match ${activeSearchMatchIndex + 1} of ${searchMatches.length} in paragraph ${activeSearchMatch.paragraphIndex + 1}. ${matchedParagraphCount} paragraph${matchedParagraphCount === 1 ? "" : "s"} contain ${matchedParagraphCount === 1 ? "this result" : "results"}.`
+              : `${searchMatches.length} matches found for "${activeSearchQuery}".`;
 
   function stopVoiceCommandListening(message?: string) {
     const recognition = voiceRecognitionRef.current;
@@ -414,6 +475,45 @@ function ReaderScreen(props: {
     if (message) {
       setVoiceCommandMessage(message);
     }
+  }
+
+  function renderParagraphText(paragraph: string, paragraphIndex: number) {
+    const paragraphMatches = searchMatchesByParagraph.get(paragraphIndex);
+
+    if (!paragraphMatches || paragraphMatches.length === 0) {
+      return paragraph;
+    }
+
+    const renderedParts: ReactNode[] = [];
+    let currentIndex = 0;
+
+    paragraphMatches.forEach((match) => {
+      if (match.startIndex > currentIndex) {
+        renderedParts.push(paragraph.slice(currentIndex, match.startIndex));
+      }
+
+      const isActiveMatch = match.matchIndex === activeSearchMatchIndex;
+
+      renderedParts.push(
+        <mark
+          key={`search-match-${paragraphIndex}-${match.matchIndex}`}
+          ref={(element) => {
+            searchMatchRefs.current[match.matchIndex] = element;
+          }}
+          className={isActiveMatch ? "reader-search-match reader-search-match-active" : "reader-search-match"}
+        >
+          {paragraph.slice(match.startIndex, match.endIndex)}
+        </mark>
+      );
+
+      currentIndex = match.endIndex;
+    });
+
+    if (currentIndex < paragraph.length) {
+      renderedParts.push(paragraph.slice(currentIndex));
+    }
+
+    return renderedParts;
   }
 
   useEffect(() => {
@@ -618,6 +718,43 @@ function ReaderScreen(props: {
   }, [props.documentState.text]);
 
   useEffect(() => {
+    setSearchInputValue("");
+    setActiveSearchQuery("");
+    setActiveSearchMatchIndex(-1);
+    searchMatchRefs.current = [];
+    shouldFocusSearchMatchRef.current = false;
+  }, [props.documentState.filePath, props.documentState.text]);
+
+  useEffect(() => {
+    if (searchMatches.length === 0) {
+      if (activeSearchMatchIndex !== -1) {
+        setActiveSearchMatchIndex(-1);
+      }
+      return;
+    }
+
+    if (activeSearchMatchIndex >= searchMatches.length) {
+      setActiveSearchMatchIndex(searchMatches.length - 1);
+    }
+  }, [activeSearchMatchIndex, searchMatches.length]);
+
+  useEffect(() => {
+    if (!activeSearchQuery || searchMatches.length === 0) {
+      return;
+    }
+
+    if (activeSearchMatch?.paragraphIndex === props.currentParagraphIndex) {
+      return;
+    }
+
+    const paragraphMatchIndex = searchMatches.findIndex((match) => match.paragraphIndex === props.currentParagraphIndex);
+
+    if (paragraphMatchIndex !== -1 && paragraphMatchIndex !== activeSearchMatchIndex) {
+      setActiveSearchMatchIndex(paragraphMatchIndex);
+    }
+  }, [activeSearchMatch, activeSearchMatchIndex, activeSearchQuery, props.currentParagraphIndex, searchMatches]);
+
+  useEffect(() => {
     if (paragraphs.length === 0) {
       if (props.currentParagraphIndex !== 0) {
         props.onCurrentParagraphIndexChange(0);
@@ -633,12 +770,28 @@ function ReaderScreen(props: {
   }, [paragraphs.length, props.currentParagraphIndex, props.onCurrentParagraphIndexChange]);
 
   useEffect(() => {
+    if (activeSearchMatch && activeSearchMatch.paragraphIndex === props.currentParagraphIndex) {
+      const activeMatchElement = searchMatchRefs.current[activeSearchMatchIndex];
+
+      activeMatchElement?.scrollIntoView({
+        block: "center",
+        inline: "nearest"
+      });
+
+      if (shouldFocusSearchMatchRef.current) {
+        paragraphRefs.current[activeSearchMatch.paragraphIndex]?.focus();
+        shouldFocusSearchMatchRef.current = false;
+      }
+
+      return;
+    }
+
     const currentParagraph = paragraphRefs.current[props.currentParagraphIndex];
 
     currentParagraph?.scrollIntoView({
       block: "nearest"
     });
-  }, [props.currentParagraphIndex]);
+  }, [activeSearchMatch, activeSearchMatchIndex, props.currentParagraphIndex]);
 
   useEffect(() => {
     if (props.focusRequest === 0) {
@@ -889,6 +1042,69 @@ function ReaderScreen(props: {
     props.onCurrentParagraphIndexChange(Math.min(props.currentParagraphIndex + 1, paragraphs.length - 1));
   }
 
+  function moveToSearchMatch(nextMatchIndex: number) {
+    if (searchMatches.length === 0) {
+      return;
+    }
+
+    const safeMatchIndex = ((nextMatchIndex % searchMatches.length) + searchMatches.length) % searchMatches.length;
+    const nextMatch = searchMatches[safeMatchIndex];
+
+    shouldFocusSearchMatchRef.current = true;
+    setActiveSearchMatchIndex(safeMatchIndex);
+    props.onCurrentParagraphIndexChange(nextMatch.paragraphIndex);
+  }
+
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!hasText) {
+      setActiveSearchQuery("");
+      setActiveSearchMatchIndex(-1);
+      return;
+    }
+
+    const nextQuery = searchInputValue.trim();
+
+    if (!nextQuery) {
+      setActiveSearchQuery("");
+      setActiveSearchMatchIndex(-1);
+      searchInputRef.current?.focus();
+      return;
+    }
+
+    const nextMatches = findParagraphSearchMatches(paragraphs, nextQuery);
+
+    setActiveSearchQuery(nextQuery);
+
+    if (nextMatches.length === 0) {
+      setActiveSearchMatchIndex(-1);
+      searchInputRef.current?.focus();
+      return;
+    }
+
+    const preferredMatchIndex = getNearestSearchMatchIndex(nextMatches, props.currentParagraphIndex);
+
+    shouldFocusSearchMatchRef.current = true;
+    setActiveSearchMatchIndex(preferredMatchIndex);
+    props.onCurrentParagraphIndexChange(nextMatches[preferredMatchIndex].paragraphIndex);
+  }
+
+  function handleSearchStep(direction: "previous" | "next") {
+    if (searchMatches.length === 0) {
+      return;
+    }
+
+    const currentIndex =
+      activeSearchMatchIndex === -1
+        ? direction === "previous"
+          ? searchMatches.length
+          : -1
+        : activeSearchMatchIndex;
+
+    moveToSearchMatch(direction === "previous" ? currentIndex - 1 : currentIndex + 1);
+  }
+
   useEffect(() => {
     function handleReaderKeydown(event: KeyboardEvent) {
       if (isInteractiveElement(event.target)) {
@@ -1071,18 +1287,28 @@ function ReaderScreen(props: {
         {paragraphs.length > 0 ? (
           <div className="reader-text" role="list" aria-label="Document paragraphs">
             {paragraphs.map((paragraph, index) => (
-              <p
+              <article
                 key={`${index}-${paragraph.slice(0, 32)}`}
                 id={`reader-paragraph-${index}`}
                 ref={(element) => {
                   paragraphRefs.current[index] = element;
                 }}
-                className={index === props.currentParagraphIndex ? "reader-paragraph current-paragraph" : "reader-paragraph"}
+                className={[
+                  "reader-paragraph",
+                  index === props.currentParagraphIndex ? "current-paragraph" : "",
+                  searchMatchesByParagraph.has(index) ? "reader-paragraph-has-match" : "",
+                  activeSearchMatch?.paragraphIndex === index ? "reader-paragraph-active-match" : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 role="listitem"
+                tabIndex={-1}
                 aria-current={index === props.currentParagraphIndex ? "true" : undefined}
+                aria-label={`Paragraph ${index + 1}`}
               >
-                {paragraph}
-              </p>
+                <span className="reader-paragraph-meta">Paragraph {index + 1}</span>
+                <p className="reader-paragraph-body">{renderParagraphText(paragraph, index)}</p>
+              </article>
             ))}
           </div>
         ) : (
@@ -1181,6 +1407,48 @@ function ReaderScreen(props: {
               Repeat paragraph
             </button>
           </div>
+
+          <section className="reader-search-panel" aria-labelledby={searchLabelId}>
+            <form className="reader-search-form" onSubmit={handleSearchSubmit}>
+              <label className="field reader-search-field" htmlFor={searchInputId}>
+                <span id={searchLabelId}>Search this document</span>
+                <input
+                  ref={searchInputRef}
+                  id={searchInputId}
+                  type="search"
+                  value={searchInputValue}
+                  onChange={(event) => setSearchInputValue(event.target.value)}
+                  placeholder="Find text in this file"
+                  disabled={!hasText || props.documentState.isLoading}
+                  aria-describedby={searchStatusId}
+                />
+              </label>
+              <div className="reader-search-actions">
+                <button type="submit" disabled={!hasText || props.documentState.isLoading}>
+                  Search
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSearchStep("previous")}
+                  disabled={searchMatches.length === 0}
+                  aria-controls={currentParagraphId}
+                >
+                  Previous match
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSearchStep("next")}
+                  disabled={searchMatches.length === 0}
+                  aria-controls={currentParagraphId}
+                >
+                  Next match
+                </button>
+              </div>
+            </form>
+            <p id={searchStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+              {searchStatusMessage}
+            </p>
+          </section>
 
           <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
             <button
@@ -1416,7 +1684,7 @@ function SettingsScreen(props: {
           <div className="panel-section-header">
             <p className="panel-kicker">Readiness</p>
             <h3 id="settings-readiness-title">Setup diagnostics</h3>
-            <p>Review what this device can already do and what still needs optional local setup.</p>
+            <p>Review what works now, what needs optional setup, and what is not available on this device yet.</p>
           </div>
           <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
             {props.runtimeSupportStatus?.message ?? "Checking what is ready on this device."}
@@ -1425,7 +1693,7 @@ function SettingsScreen(props: {
             {runtimeDiagnostics.map((item) => (
               <li key={item.id} className="voice-diagnostics-item">
                 <span className="voice-diagnostics-name">
-                  {item.label}: {item.ready ? "Ready" : "Missing"}
+                  {item.label}: {item.statusLabel}
                 </span>
                 <span className="voice-diagnostics-meta">{item.detail}</span>
               </li>
@@ -1738,7 +2006,7 @@ export function App() {
           ocrSupportAvailable: false,
           arabicOcrSupportAvailable: false,
           message:
-            "Phronon could not verify optional OCR support yet. Core app and standard PDF reading should still work in this release."
+            "Phronon could not fully check optional extras yet. TXT files and standard text-based PDFs should still work."
         });
       });
 

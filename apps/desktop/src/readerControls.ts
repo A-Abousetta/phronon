@@ -9,6 +9,12 @@ export type ReaderShortcutAction =
   | "increaseSpeed"
   | "decreaseSpeed";
 
+export type ParagraphSearchMatch = {
+  paragraphIndex: number;
+  startIndex: number;
+  endIndex: number;
+};
+
 export type ReaderShortcutInput = {
   key: string;
   code?: string;
@@ -30,7 +36,21 @@ function normalizeLine(line: string) {
 }
 
 function looksLikeStructuralLine(line: string) {
-  return /^[-*•]\s+/.test(line) || /^\d+[\.\)]\s+/.test(line) || /[:;]$/.test(line);
+  return /^[-*\u2022]\s+/.test(line) || /^\d+[\.\)]\s+/.test(line) || /[:;]$/.test(line);
+}
+
+function looksLikeHeading(line: string) {
+  const normalizedLine = normalizeLine(line);
+
+  if (!normalizedLine || normalizedLine.length > 80) {
+    return false;
+  }
+
+  return (
+    /^[A-Z0-9\s"'&/()-]+$/.test(normalizedLine) ||
+    /^chapter\s+\d+/i.test(normalizedLine) ||
+    /^section\s+\d+/i.test(normalizedLine)
+  );
 }
 
 function shouldMergeLines(currentLine: string, nextLine: string) {
@@ -41,7 +61,7 @@ function shouldMergeLines(currentLine: string, nextLine: string) {
     return false;
   }
 
-  if (looksLikeStructuralLine(current) || looksLikeStructuralLine(next)) {
+  if (looksLikeStructuralLine(current) || looksLikeStructuralLine(next) || looksLikeHeading(next)) {
     return false;
   }
 
@@ -89,6 +109,80 @@ function buildParagraphFromBlock(block: string) {
   return paragraphs;
 }
 
+function splitParagraphBySentenceGroups(paragraph: string) {
+  const normalizedParagraph = normalizeLine(paragraph);
+
+  if (!normalizedParagraph) {
+    return [];
+  }
+
+  if (looksLikeStructuralLine(normalizedParagraph) || looksLikeHeading(normalizedParagraph)) {
+    return [normalizedParagraph];
+  }
+
+  const sentenceParts = normalizedParagraph
+    .match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g)
+    ?.map((part) => part.trim())
+    .filter(Boolean);
+
+  if (sentenceParts && sentenceParts.length > 1) {
+    const groupedParagraphs: string[] = [];
+    let currentGroup = "";
+    let currentSentenceCount = 0;
+
+    for (const sentence of sentenceParts) {
+      const nextGroup = currentGroup ? `${currentGroup} ${sentence}` : sentence;
+      const shouldSplitBeforeSentence =
+        currentGroup.length > 0 &&
+        (nextGroup.length > 340 || currentSentenceCount >= 3);
+
+      if (shouldSplitBeforeSentence) {
+        groupedParagraphs.push(currentGroup);
+        currentGroup = sentence;
+        currentSentenceCount = 1;
+        continue;
+      }
+
+      currentGroup = nextGroup;
+      currentSentenceCount += 1;
+    }
+
+    if (currentGroup) {
+      groupedParagraphs.push(currentGroup);
+    }
+
+    return groupedParagraphs;
+  }
+
+  const words = normalizedParagraph.split(/\s+/).filter(Boolean);
+
+  if (words.length <= 70) {
+    return [normalizedParagraph];
+  }
+
+  const groupedParagraphs: string[] = [];
+  let currentWords: string[] = [];
+
+  for (const word of words) {
+    currentWords.push(word);
+
+    if (currentWords.length >= 55) {
+      groupedParagraphs.push(currentWords.join(" "));
+      currentWords = [];
+    }
+  }
+
+  if (currentWords.length > 0) {
+    if (groupedParagraphs.length > 0 && currentWords.length < 18) {
+      groupedParagraphs[groupedParagraphs.length - 1] = `${groupedParagraphs[groupedParagraphs.length - 1]} ${currentWords.join(" ")}`;
+    } else {
+      groupedParagraphs.push(currentWords.join(" "));
+    }
+  }
+
+  return groupedParagraphs;
+}
+
 export function splitIntoParagraphs(text: string | null) {
   if (!text) {
     return [];
@@ -98,6 +192,7 @@ export function splitIntoParagraphs(text: string | null) {
     .replace(/\r\n/g, "\n")
     .split(/\n\s*\n+/)
     .flatMap((block) => buildParagraphFromBlock(block))
+    .flatMap((paragraph) => splitParagraphBySentenceGroups(paragraph))
     .filter(Boolean);
 }
 
@@ -115,6 +210,42 @@ export function splitParagraphIntoSpeechChunks(paragraph: string) {
   }
 
   return sentenceChunks.map((chunk) => chunk.trim()).filter(Boolean);
+}
+
+function normalizeSearchQuery(query: string) {
+  return query.trim().toLocaleLowerCase();
+}
+
+export function findParagraphSearchMatches(paragraphs: string[], query: string): ParagraphSearchMatch[] {
+  const normalizedQuery = normalizeSearchQuery(query);
+
+  if (!normalizedQuery) {
+    return [];
+  }
+
+  const matches: ParagraphSearchMatch[] = [];
+
+  paragraphs.forEach((paragraph, paragraphIndex) => {
+    const normalizedParagraph = paragraph.toLocaleLowerCase();
+    let searchStartIndex = 0;
+
+    while (searchStartIndex < normalizedParagraph.length) {
+      const matchStartIndex = normalizedParagraph.indexOf(normalizedQuery, searchStartIndex);
+
+      if (matchStartIndex === -1) {
+        break;
+      }
+
+      matches.push({
+        paragraphIndex,
+        startIndex: matchStartIndex,
+        endIndex: matchStartIndex + normalizedQuery.length
+      });
+      searchStartIndex = matchStartIndex + normalizedQuery.length;
+    }
+  });
+
+  return matches;
 }
 
 export function getAppShortcutAction(input: ReaderShortcutInput): AppShortcutAction | null {

@@ -11,6 +11,7 @@ export type DiagnosticsItem = {
   id: "core" | "pdf" | "ocr" | "arabicOcr" | "arabicTts";
   label: string;
   ready: boolean;
+  statusLabel: "Works immediately" | "Optional extra setup" | "Unavailable on this device" | "Checking";
   detail: string;
 };
 
@@ -27,43 +28,52 @@ export function buildRuntimeDiagnosticsItems(options: {
       id: "core",
       label: "Core app",
       ready: runtimeSupportStatus?.coreAppReady ?? false,
+      statusLabel: runtimeSupportStatus?.coreAppReady ? "Works immediately" : "Checking",
       detail: runtimeSupportStatus?.coreAppReady
-        ? "Ready. The packaged desktop app can open, navigate, and persist local study state."
-        : "Checking whether the packaged app is ready."
+        ? "Open local study files, move through the app, and keep your place after restart."
+        : "Phronon is checking whether the app is ready."
     },
     {
       id: "pdf",
       label: "Standard PDF support",
       ready: runtimeSupportStatus?.pdfSupportAvailable ?? false,
+      statusLabel: runtimeSupportStatus?.pdfSupportAvailable ? "Works immediately" : "Checking",
       detail: runtimeSupportStatus?.pdfSupportAvailable
-        ? "Ready. Standard text-based PDF reading is built into this release."
-        : "Missing. Standard PDF support is still being checked."
+        ? "Text-based PDFs work in this release with no extra setup."
+        : "Phronon is checking standard PDF support."
     },
     {
       id: "ocr",
       label: "OCR for scanned PDFs",
       ready: runtimeSupportStatus?.ocrSupportAvailable ?? false,
+      statusLabel: runtimeSupportStatus?.ocrSupportAvailable ? "Works immediately" : "Optional extra setup",
       detail: runtimeSupportStatus?.ocrSupportAvailable
-        ? "Ready. Scanned and image-only PDFs can use the optional local OCR path."
-        : "Missing. Install Python 3.11 or newer, pytesseract, pypdfium2, Pillow, and Tesseract OCR to enable OCR."
+        ? "Scanned and image-only PDFs can use the local OCR path on this device."
+        : "Scanned PDFs need optional setup: Python 3.11 or newer, pytesseract, pypdfium2, Pillow, and Tesseract OCR."
     },
     {
       id: "arabicOcr",
       label: "Arabic OCR",
       ready: runtimeSupportStatus?.arabicOcrSupportAvailable ?? false,
+      statusLabel: runtimeSupportStatus?.arabicOcrSupportAvailable ? "Works immediately" : "Optional extra setup",
       detail: runtimeSupportStatus?.arabicOcrSupportAvailable
-        ? "Ready. Tesseract Arabic language data appears to be available."
-        : "Missing. Install Arabic language data for Tesseract to improve Arabic OCR."
+        ? "Arabic language data for Tesseract was found."
+        : "Arabic OCR needs the Arabic language data for Tesseract."
     },
     {
       id: "arabicTts",
       label: "Arabic text-to-speech",
       ready: arabicTtsReady,
-      detail: !options.voicesInitialized
-        ? "Checking available speech voices on this device."
+      statusLabel: !options.voicesInitialized
+        ? "Checking"
         : arabicTtsReady
-          ? "Ready. An Arabic-capable speech voice was reported by this device."
-          : "Missing. Install or enable an Arabic-capable Windows speech voice for better Arabic playback."
+          ? "Works immediately"
+          : "Unavailable on this device",
+      detail: !options.voicesInitialized
+        ? "Phronon is checking the speech voices available on this device."
+        : arabicTtsReady
+          ? "An Arabic-capable speech voice is available for playback."
+          : "No Arabic-capable Windows speech voice was reported. Arabic text can still play, but pronunciation may sound wrong until one is installed or enabled."
     }
   ];
 }

@@ -255,7 +255,7 @@ test("buildDocumentLoadStatusMessage explains the active load operation", () => 
       origin: "recentDocument",
       filePath: "C:\\docs\\Chemistry.pdf"
     }),
-    "Opening recent document: Chemistry.pdf. If it is scanned, Phronon may need local OCR and this can take a little longer."
+    "Opening recent document: Chemistry.pdf. If it is a scanned PDF, Phronon may use optional local OCR, so opening can take a little longer."
   );
 
   assert.equal(

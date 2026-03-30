@@ -228,7 +228,7 @@ export function buildDocumentLoadStatusMessage(options: {
   filePath?: string | null;
 }) {
   const isPdf = options.filePath?.toLowerCase().endsWith(".pdf") ?? false;
-  const pdfOcrNote = " If it is scanned, Phronon may need local OCR and this can take a little longer.";
+  const pdfOcrNote = " If it is a scanned PDF, Phronon may use optional local OCR, so opening can take a little longer.";
 
   if (options.origin === "startupRestore") {
     return options.filePath

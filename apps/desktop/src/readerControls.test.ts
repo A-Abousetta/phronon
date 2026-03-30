@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  findParagraphSearchMatches,
   getAppShortcutAction,
   getReaderShortcutAction,
   splitIntoParagraphs,
@@ -26,6 +27,16 @@ function runTests() {
     ["Heading:", "A short explanatory line continues here", "1. First list item", "2. Second list item"]
   );
 
+  assert.deepEqual(
+    splitIntoParagraphs(
+      "This OCR block keeps going without a blank line. It has several sentences that should stay readable together. It keeps explaining the same topic for a while. Another sentence pushes the paragraph past a comfortable reading size. One more sentence should create a second readable section instead of a giant wall of text."
+    ),
+    [
+      "This OCR block keeps going without a blank line. It has several sentences that should stay readable together. It keeps explaining the same topic for a while.",
+      "Another sentence pushes the paragraph past a comfortable reading size. One more sentence should create a second readable section instead of a giant wall of text."
+    ]
+  );
+
   assert.deepEqual(splitIntoParagraphs(null), []);
   assert.deepEqual(splitIntoParagraphs(" \n \n "), []);
   assert.deepEqual(splitParagraphIntoSpeechChunks("Single sentence"), ["Single sentence"]);
@@ -38,6 +49,45 @@ function runTests() {
     "First item.",
     "Second item."
   ]);
+  assert.deepEqual(
+    findParagraphSearchMatches(
+      ["Photosynthesis starts with light energy.", "Light helps the plant make food.", "No match here."],
+      "light"
+    ),
+    [
+      {
+        paragraphIndex: 0,
+        startIndex: 27,
+        endIndex: 32
+      },
+      {
+        paragraphIndex: 1,
+        startIndex: 0,
+        endIndex: 5
+      }
+    ]
+  );
+  assert.deepEqual(
+    findParagraphSearchMatches(["Repeat repeat REPEAT", "Different"], "repeat"),
+    [
+      {
+        paragraphIndex: 0,
+        startIndex: 0,
+        endIndex: 6
+      },
+      {
+        paragraphIndex: 0,
+        startIndex: 7,
+        endIndex: 13
+      },
+      {
+        paragraphIndex: 0,
+        startIndex: 14,
+        endIndex: 20
+      }
+    ]
+  );
+  assert.deepEqual(findParagraphSearchMatches(["Anything"], "   "), []);
 
   assert.equal(
     getAppShortcutAction({

@@ -9,7 +9,7 @@ const fullyReadyRuntimeStatus: RuntimeSupportStatus = {
   pdfSupportAvailable: true,
   ocrSupportAvailable: true,
   arabicOcrSupportAvailable: true,
-  message: "Core app, standard PDF reading, OCR, and Arabic OCR are ready on this device."
+  message: "You can start right away with TXT files, standard PDFs, scanned PDFs, and Arabic OCR on this device."
 };
 
 test("buildRuntimeDiagnosticsItems reports all ready capabilities clearly", () => {
@@ -20,13 +20,13 @@ test("buildRuntimeDiagnosticsItems reports all ready capabilities clearly", () =
   });
 
   assert.deepEqual(
-    items.map((item) => ({ id: item.id, ready: item.ready })),
+    items.map((item) => ({ id: item.id, ready: item.ready, statusLabel: item.statusLabel })),
     [
-      { id: "core", ready: true },
-      { id: "pdf", ready: true },
-      { id: "ocr", ready: true },
-      { id: "arabicOcr", ready: true },
-      { id: "arabicTts", ready: true }
+      { id: "core", ready: true, statusLabel: "Works immediately" },
+      { id: "pdf", ready: true, statusLabel: "Works immediately" },
+      { id: "ocr", ready: true, statusLabel: "Works immediately" },
+      { id: "arabicOcr", ready: true, statusLabel: "Works immediately" },
+      { id: "arabicTts", ready: true, statusLabel: "Works immediately" }
     ]
   );
 });
@@ -43,7 +43,9 @@ test("buildRuntimeDiagnosticsItems keeps missing OCR and Arabic voice guidance e
   });
 
   assert.equal(items.find((item) => item.id === "ocr")?.ready, false);
-  assert.match(items.find((item) => item.id === "ocr")?.detail ?? "", /Install Python 3.11 or newer/i);
+  assert.equal(items.find((item) => item.id === "ocr")?.statusLabel, "Optional extra setup");
+  assert.match(items.find((item) => item.id === "ocr")?.detail ?? "", /Scanned PDFs need optional setup/i);
   assert.equal(items.find((item) => item.id === "arabicTts")?.ready, false);
-  assert.match(items.find((item) => item.id === "arabicTts")?.detail ?? "", /Arabic-capable Windows speech voice/i);
+  assert.equal(items.find((item) => item.id === "arabicTts")?.statusLabel, "Unavailable on this device");
+  assert.match(items.find((item) => item.id === "arabicTts")?.detail ?? "", /No Arabic-capable Windows speech voice/i);
 });
