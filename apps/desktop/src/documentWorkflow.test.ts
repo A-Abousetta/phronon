@@ -10,11 +10,17 @@ import {
   clampParagraphIndex,
   clampReadingSpeed,
   createParagraphBookmark,
+  createTextHighlight,
   getBookmarksForDocument,
   getDocumentFileName,
+  getHighlightsForDocument,
   normalizeBookmarkNote,
+  normalizeHighlightNote,
+  normalizeHighlightSelectionText,
   parseReaderPersistenceState,
+  removeTextHighlight,
   upsertParagraphBookmark,
+  upsertTextHighlight,
   upsertRecentDocument
 } from "./documentWorkflow.js";
 
@@ -82,6 +88,7 @@ test("parseReaderPersistenceState returns safe defaults for invalid data", () =>
   assert.deepEqual(parseReaderPersistenceState("{not valid json"), {
     recentDocuments: [],
     bookmarksByDocument: {},
+    highlightsByDocument: {},
     readingSpeed: 1,
     interfaceTextScale: "default",
     readerTextScale: "default",
@@ -122,6 +129,21 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
         }
       ]
     },
+    highlightsByDocument: {
+      "C:\\docs\\Notes.txt": [
+        {
+          id: "p3-s5-e17-important-phrase",
+          documentPath: "C:\\docs\\Notes.txt",
+          paragraphIndex: 3.8,
+          selectedText: " Important   phrase ",
+          previewText: " Important   phrase ",
+          startOffset: 5.9,
+          endOffset: 17.4,
+          note: " Review  this ",
+          createdAt: 4500
+        }
+      ]
+    },
     readingSpeed: 2.7,
     interfaceTextScale: "largest",
     readerTextScale: "large",
@@ -150,6 +172,21 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
           previewText: "Saved paragraph preview",
           note: "Review this part later",
           createdAt: 4000
+        }
+      ]
+    },
+    highlightsByDocument: {
+      "C:\\docs\\Notes.txt": [
+        {
+          id: "p3-s5-e17-important-phrase",
+          documentPath: "C:\\docs\\Notes.txt",
+          paragraphIndex: 3,
+          selectedText: "Important phrase",
+          previewText: "Important phrase",
+          startOffset: 5,
+          endOffset: 17,
+          note: "Review this",
+          createdAt: 4500
         }
       ]
     },
@@ -321,6 +358,100 @@ test("bookmark helpers build, store, and read document-scoped bookmarks", () => 
   );
 });
 
+test("highlight helpers build, store, update, and remove document-scoped highlights", () => {
+  const highlight = createTextHighlight({
+    documentPath: "C:\\docs\\Notes.txt",
+    paragraphIndex: 2,
+    paragraphText: "This paragraph contains an important phrase for the exam.",
+    selectedText: "important phrase",
+    startOffset: 27,
+    endOffset: 43,
+    noteText: "Review this",
+    now: 6000
+  });
+
+  assert.deepEqual(highlight, {
+    id: "p2-s27-e43-important-phrase",
+    documentPath: "C:\\docs\\Notes.txt",
+    paragraphIndex: 2,
+    selectedText: "important phrase",
+    previewText: "important phrase",
+    startOffset: 27,
+    endOffset: 43,
+    note: "Review this",
+    createdAt: 6000
+  });
+
+  const updatedHighlight = createTextHighlight({
+    documentPath: "C:\\docs\\Notes.txt",
+    paragraphIndex: 2,
+    paragraphText: "This paragraph contains an important phrase for the exam.",
+    selectedText: "important phrase",
+    startOffset: 27,
+    endOffset: 43,
+    noteText: "Quiz topic",
+    now: 7000
+  });
+
+  const savedHighlights = upsertTextHighlight(
+    [
+      {
+        id: "p5-s0-e4-later",
+        documentPath: "C:\\docs\\Notes.txt",
+        paragraphIndex: 5,
+        selectedText: "Later",
+        previewText: "Later",
+        startOffset: 0,
+        endOffset: 4,
+        note: "",
+        createdAt: 6500
+      }
+    ],
+    highlight
+  );
+
+  assert.deepEqual(
+    getHighlightsForDocument(
+      {
+        "C:\\docs\\Notes.txt": savedHighlights
+      },
+      "C:\\docs\\Notes.txt"
+    ),
+    savedHighlights
+  );
+
+  assert.deepEqual(upsertTextHighlight(savedHighlights, updatedHighlight), [
+    {
+      ...updatedHighlight
+    },
+    {
+      id: "p5-s0-e4-later",
+      documentPath: "C:\\docs\\Notes.txt",
+      paragraphIndex: 5,
+      selectedText: "Later",
+      previewText: "Later",
+      startOffset: 0,
+      endOffset: 4,
+      note: "",
+      createdAt: 6500
+    }
+  ]);
+
+  assert.deepEqual(removeTextHighlight(savedHighlights, highlight.id), [
+    {
+      id: "p5-s0-e4-later",
+      documentPath: "C:\\docs\\Notes.txt",
+      paragraphIndex: 5,
+      selectedText: "Later",
+      previewText: "Later",
+      startOffset: 0,
+      endOffset: 4,
+      note: "",
+      createdAt: 6500
+    }
+  ]);
+});
+
 test("buildBookmarkPreviewText trims long paragraphs safely", () => {
   assert.equal(
     buildBookmarkPreviewText("One two three four five six seven eight nine ten eleven twelve.", 20),
@@ -332,4 +463,10 @@ test("normalizeBookmarkNote keeps notes short and blank-safe", () => {
   assert.equal(normalizeBookmarkNote("   exam topic   "), "exam topic");
   assert.equal(normalizeBookmarkNote(""), "");
   assert.equal(normalizeBookmarkNote("one two three four five", 12), "one two thre");
+});
+
+test("highlight normalization keeps selections and notes short and blank-safe", () => {
+  assert.equal(normalizeHighlightSelectionText("   key   phrase   "), "key phrase");
+  assert.equal(normalizeHighlightSelectionText(""), "");
+  assert.equal(normalizeHighlightNote("   exam topic   "), "exam topic");
 });

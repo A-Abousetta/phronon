@@ -27,9 +27,22 @@ export type ParagraphBookmark = {
   createdAt: number;
 };
 
+export type TextHighlight = {
+  id: string;
+  documentPath: string;
+  paragraphIndex: number;
+  selectedText: string;
+  previewText: string;
+  startOffset: number;
+  endOffset: number;
+  note: string;
+  createdAt: number;
+};
+
 export type ReaderPersistenceState = {
   recentDocuments: RecentDocument[];
   bookmarksByDocument: Record<string, ParagraphBookmark[]>;
+  highlightsByDocument: Record<string, TextHighlight[]>;
   readingSpeed: number;
   interfaceTextScale: InterfaceTextScale;
   readerTextScale: ReaderTextScale;
@@ -48,6 +61,8 @@ const DEFAULT_READING_SPEED = 1;
 const MIN_READING_SPEED = 0.5;
 const MAX_READING_SPEED = 2;
 export const MAX_BOOKMARK_NOTE_LENGTH = 160;
+export const MAX_HIGHLIGHT_NOTE_LENGTH = 160;
+export const MAX_HIGHLIGHT_SELECTION_LENGTH = 240;
 
 export const emptyReaderDocumentState: ReaderDocumentState = {
   filePath: null,
@@ -60,6 +75,7 @@ export const emptyReaderDocumentState: ReaderDocumentState = {
 export const defaultReaderPersistenceState: ReaderPersistenceState = {
   recentDocuments: [],
   bookmarksByDocument: {},
+  highlightsByDocument: {},
   readingSpeed: DEFAULT_READING_SPEED,
   interfaceTextScale: "default",
   readerTextScale: "default",
@@ -186,6 +202,20 @@ export function buildBookmarkPreviewText(paragraphText: string, maxLength = 96) 
   return `${normalizedText.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+export function normalizeHighlightSelectionText(selectionText: string, maxLength = MAX_HIGHLIGHT_SELECTION_LENGTH) {
+  const normalizedText = selectionText.replace(/\s+/g, " ").trim();
+
+  if (!normalizedText) {
+    return "";
+  }
+
+  if (normalizedText.length <= maxLength) {
+    return normalizedText;
+  }
+
+  return normalizedText.slice(0, maxLength).trimEnd();
+}
+
 export function normalizeBookmarkNote(noteText: string, maxLength = MAX_BOOKMARK_NOTE_LENGTH) {
   const normalizedText = noteText.replace(/\s+/g, " ").trim();
 
@@ -198,6 +228,28 @@ export function normalizeBookmarkNote(noteText: string, maxLength = MAX_BOOKMARK
   }
 
   return normalizedText.slice(0, maxLength).trimEnd();
+}
+
+export function normalizeHighlightNote(noteText: string) {
+  return normalizeBookmarkNote(noteText, MAX_HIGHLIGHT_NOTE_LENGTH);
+}
+
+function clampTextOffset(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor(value));
+}
+
+function buildTextHighlightId(options: {
+  paragraphIndex: number;
+  startOffset: number;
+  endOffset: number;
+  selectedText: string;
+}) {
+  const safeText = options.selectedText.toLowerCase().replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
+  return `p${options.paragraphIndex}-s${options.startOffset}-e${options.endOffset}-${safeText || "highlight"}`;
 }
 
 export function createParagraphBookmark(options: {
@@ -216,6 +268,43 @@ export function createParagraphBookmark(options: {
   };
 }
 
+export function createTextHighlight(options: {
+  documentPath: string;
+  paragraphIndex: number;
+  paragraphText: string;
+  selectedText: string;
+  startOffset: number;
+  endOffset: number;
+  noteText?: string;
+  now?: number;
+}): TextHighlight {
+  const safeParagraphIndex = clampParagraphIndex(options.paragraphIndex);
+  const paragraphLength = options.paragraphText.length;
+  const safeStartOffset = Math.min(clampTextOffset(options.startOffset), paragraphLength);
+  const safeEndOffset = Math.min(Math.max(clampTextOffset(options.endOffset), safeStartOffset), paragraphLength);
+  const normalizedSelection = normalizeHighlightSelectionText(options.selectedText);
+  const selectedText =
+    normalizedSelection ||
+    normalizeHighlightSelectionText(options.paragraphText.slice(safeStartOffset, safeEndOffset));
+
+  return {
+    id: buildTextHighlightId({
+      paragraphIndex: safeParagraphIndex,
+      startOffset: safeStartOffset,
+      endOffset: safeEndOffset,
+      selectedText
+    }),
+    documentPath: options.documentPath,
+    paragraphIndex: safeParagraphIndex,
+    selectedText,
+    previewText: buildBookmarkPreviewText(selectedText, 72),
+    startOffset: safeStartOffset,
+    endOffset: safeEndOffset,
+    note: normalizeHighlightNote(options.noteText ?? ""),
+    createdAt: options.now ?? Date.now()
+  };
+}
+
 export function upsertParagraphBookmark(
   bookmarks: ParagraphBookmark[],
   nextBookmark: ParagraphBookmark
@@ -230,6 +319,28 @@ export function upsertParagraphBookmark(
     .slice(0, 100);
 }
 
+export function upsertTextHighlight(highlights: TextHighlight[], nextHighlight: TextHighlight) {
+  const otherHighlights = highlights.filter((highlight) => highlight.id !== nextHighlight.id);
+
+  return [nextHighlight, ...otherHighlights]
+    .sort((left, right) => {
+      if (left.paragraphIndex !== right.paragraphIndex) {
+        return left.paragraphIndex - right.paragraphIndex;
+      }
+
+      if (left.startOffset !== right.startOffset) {
+        return left.startOffset - right.startOffset;
+      }
+
+      return left.endOffset - right.endOffset;
+    })
+    .slice(0, 200);
+}
+
+export function removeTextHighlight(highlights: TextHighlight[], highlightId: string) {
+  return highlights.filter((highlight) => highlight.id !== highlightId);
+}
+
 export function getBookmarksForDocument(
   bookmarksByDocument: Record<string, ParagraphBookmark[]>,
   documentPath: string | null | undefined
@@ -239,6 +350,17 @@ export function getBookmarksForDocument(
   }
 
   return bookmarksByDocument[documentPath] ?? [];
+}
+
+export function getHighlightsForDocument(
+  highlightsByDocument: Record<string, TextHighlight[]>,
+  documentPath: string | null | undefined
+) {
+  if (!documentPath) {
+    return [];
+  }
+
+  return highlightsByDocument[documentPath] ?? [];
 }
 
 export function buildDocumentLoadStatusMessage(options: {
@@ -314,6 +436,29 @@ function isParagraphBookmark(value: unknown): value is ParagraphBookmark {
   );
 }
 
+function isTextHighlight(value: unknown): value is TextHighlight {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<TextHighlight>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.documentPath === "string" &&
+    typeof candidate.selectedText === "string" &&
+    typeof candidate.previewText === "string" &&
+    typeof candidate.note === "string" &&
+    typeof candidate.createdAt === "number" &&
+    Number.isFinite(candidate.createdAt) &&
+    typeof candidate.paragraphIndex === "number" &&
+    Number.isFinite(candidate.paragraphIndex) &&
+    typeof candidate.startOffset === "number" &&
+    Number.isFinite(candidate.startOffset) &&
+    typeof candidate.endOffset === "number" &&
+    Number.isFinite(candidate.endOffset)
+  );
+}
+
 export function parseReaderPersistenceState(rawValue: string | null): ReaderPersistenceState {
   if (!rawValue) {
     return defaultReaderPersistenceState;
@@ -347,10 +492,65 @@ export function parseReaderPersistenceState(rawValue: string | null): ReaderPers
               ])
           )
         : {};
+    const highlightsByDocument =
+      parsed.highlightsByDocument && typeof parsed.highlightsByDocument === "object"
+        ? Object.fromEntries(
+            Object.entries(parsed.highlightsByDocument)
+              .filter(([documentPath]) => typeof documentPath === "string" && documentPath.trim().length > 0)
+              .map(([documentPath, highlights]) => [
+                documentPath,
+                Array.isArray(highlights)
+                  ? highlights
+                      .filter(isTextHighlight)
+                      .map((highlight) => {
+                        const paragraphIndex = clampParagraphIndex(highlight.paragraphIndex);
+                        const startOffset = clampTextOffset(highlight.startOffset);
+                        const endOffset = Math.max(clampTextOffset(highlight.endOffset), startOffset);
+                        const selectedText = normalizeHighlightSelectionText(highlight.selectedText);
+
+                        return {
+                          ...highlight,
+                          id:
+                            highlight.id.trim().length > 0
+                              ? highlight.id
+                              : buildTextHighlightId({
+                                  paragraphIndex,
+                                  startOffset,
+                                  endOffset,
+                                  selectedText
+                                }),
+                          paragraphIndex,
+                          selectedText,
+                          previewText: buildBookmarkPreviewText(
+                            highlight.previewText.trim().length > 0 ? highlight.previewText : selectedText,
+                            72
+                          ),
+                          startOffset,
+                          endOffset,
+                          note: normalizeHighlightNote(highlight.note)
+                        };
+                      })
+                      .sort((left, right) => {
+                        if (left.paragraphIndex !== right.paragraphIndex) {
+                          return left.paragraphIndex - right.paragraphIndex;
+                        }
+
+                        if (left.startOffset !== right.startOffset) {
+                          return left.startOffset - right.startOffset;
+                        }
+
+                        return left.endOffset - right.endOffset;
+                      })
+                      .slice(0, 200)
+                  : []
+              ])
+          )
+        : {};
 
     return {
       recentDocuments,
       bookmarksByDocument,
+      highlightsByDocument,
       readingSpeed: clampReadingSpeed(
         typeof parsed.readingSpeed === "number" ? parsed.readingSpeed : DEFAULT_READING_SPEED
       ),
