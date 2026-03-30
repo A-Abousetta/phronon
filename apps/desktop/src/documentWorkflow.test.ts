@@ -12,6 +12,7 @@ import {
   createParagraphBookmark,
   getBookmarksForDocument,
   getDocumentFileName,
+  normalizeBookmarkNote,
   parseReaderPersistenceState,
   upsertParagraphBookmark,
   upsertRecentDocument
@@ -113,6 +114,7 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
           documentPath: "C:\\docs\\Notes.txt",
           paragraphIndex: 3.8,
           previewText: "Saved paragraph preview",
+          note: "Review this part later",
           createdAt: 4000
         },
         {
@@ -146,6 +148,7 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
           documentPath: "C:\\docs\\Notes.txt",
           paragraphIndex: 3,
           previewText: "Saved paragraph preview",
+          note: "Review this part later",
           createdAt: 4000
         }
       ]
@@ -271,6 +274,7 @@ test("bookmark helpers build, store, and read document-scoped bookmarks", () => 
     documentPath: "C:\\docs\\Notes.txt",
     paragraphIndex: 2,
     paragraphText: "This is a longer paragraph preview that should stay readable in the bookmark list.",
+    noteText: "Quiz on Tuesday",
     now: 5000
   });
 
@@ -278,6 +282,7 @@ test("bookmark helpers build, store, and read document-scoped bookmarks", () => 
     documentPath: "C:\\docs\\Notes.txt",
     paragraphIndex: 2,
     previewText: "This is a longer paragraph preview that should stay readable in the bookmark list.",
+    note: "Quiz on Tuesday",
     createdAt: 5000
   });
 
@@ -287,6 +292,7 @@ test("bookmark helpers build, store, and read document-scoped bookmarks", () => 
         documentPath: "C:\\docs\\Notes.txt",
         paragraphIndex: 5,
         previewText: "Later paragraph",
+        note: "",
         createdAt: 2000
       }
     ],
@@ -299,6 +305,7 @@ test("bookmark helpers build, store, and read document-scoped bookmarks", () => 
       documentPath: "C:\\docs\\Notes.txt",
       paragraphIndex: 5,
       previewText: "Later paragraph",
+      note: "",
       createdAt: 2000
     }
   ]);
@@ -319,4 +326,10 @@ test("buildBookmarkPreviewText trims long paragraphs safely", () => {
     buildBookmarkPreviewText("One two three four five six seven eight nine ten eleven twelve.", 20),
     "One two three four…"
   );
+});
+
+test("normalizeBookmarkNote keeps notes short and blank-safe", () => {
+  assert.equal(normalizeBookmarkNote("   exam topic   "), "exam topic");
+  assert.equal(normalizeBookmarkNote(""), "");
+  assert.equal(normalizeBookmarkNote("one two three four five", 12), "one two thre");
 });

@@ -23,6 +23,7 @@ export type ParagraphBookmark = {
   documentPath: string;
   paragraphIndex: number;
   previewText: string;
+  note: string;
   createdAt: number;
 };
 
@@ -46,6 +47,7 @@ const READER_PERSISTENCE_KEY = "phronon.reader.persistence";
 const DEFAULT_READING_SPEED = 1;
 const MIN_READING_SPEED = 0.5;
 const MAX_READING_SPEED = 2;
+export const MAX_BOOKMARK_NOTE_LENGTH = 160;
 
 export const emptyReaderDocumentState: ReaderDocumentState = {
   filePath: null,
@@ -184,16 +186,32 @@ export function buildBookmarkPreviewText(paragraphText: string, maxLength = 96) 
   return `${normalizedText.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+export function normalizeBookmarkNote(noteText: string, maxLength = MAX_BOOKMARK_NOTE_LENGTH) {
+  const normalizedText = noteText.replace(/\s+/g, " ").trim();
+
+  if (!normalizedText) {
+    return "";
+  }
+
+  if (normalizedText.length <= maxLength) {
+    return normalizedText;
+  }
+
+  return normalizedText.slice(0, maxLength).trimEnd();
+}
+
 export function createParagraphBookmark(options: {
   documentPath: string;
   paragraphIndex: number;
   paragraphText: string;
+  noteText?: string;
   now?: number;
 }): ParagraphBookmark {
   return {
     documentPath: options.documentPath,
     paragraphIndex: clampParagraphIndex(options.paragraphIndex),
     previewText: buildBookmarkPreviewText(options.paragraphText),
+    note: normalizeBookmarkNote(options.noteText ?? ""),
     createdAt: options.now ?? Date.now()
   };
 }
@@ -288,6 +306,7 @@ function isParagraphBookmark(value: unknown): value is ParagraphBookmark {
   return (
     typeof candidate.documentPath === "string" &&
     typeof candidate.previewText === "string" &&
+    (candidate.note === undefined || typeof candidate.note === "string") &&
     typeof candidate.createdAt === "number" &&
     Number.isFinite(candidate.createdAt) &&
     typeof candidate.paragraphIndex === "number" &&
@@ -319,6 +338,7 @@ export function parseReaderPersistenceState(rawValue: string | null): ReaderPers
                       .filter(isParagraphBookmark)
                       .map((bookmark) => ({
                         ...bookmark,
+                        note: normalizeBookmarkNote(bookmark.note ?? ""),
                         paragraphIndex: clampParagraphIndex(bookmark.paragraphIndex)
                       }))
                       .sort((left, right) => left.paragraphIndex - right.paragraphIndex)

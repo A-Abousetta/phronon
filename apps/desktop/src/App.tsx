@@ -23,6 +23,8 @@ import {
   emptyReaderDocumentState,
   getBookmarksForDocument,
   getDocumentFileName,
+  MAX_BOOKMARK_NOTE_LENGTH,
+  normalizeBookmarkNote,
   parseContrastMode,
   parseInterfaceTextScale,
   parseReaderTextScale,
@@ -385,7 +387,7 @@ function ReaderScreen(props: {
   bookmarks: ParagraphBookmark[];
   currentParagraphIndex: number;
   onCurrentParagraphIndexChange: (nextIndex: number) => void;
-  onAddBookmark: (paragraphIndex: number, paragraphText: string) => void;
+  onAddBookmark: (paragraphIndex: number, paragraphText: string, noteText: string) => void;
   onOpenDocument: () => Promise<void>;
   availableVoices: SpeechSynthesisVoice[];
   voicesInitialized: boolean;
@@ -403,6 +405,7 @@ function ReaderScreen(props: {
   const [searchInputValue, setSearchInputValue] = useState("");
   const [activeSearchQuery, setActiveSearchQuery] = useState("");
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
+  const [bookmarkNoteInputValue, setBookmarkNoteInputValue] = useState("");
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voiceRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const paragraphRefs = useRef<Array<HTMLElement | null>>([]);
@@ -430,6 +433,8 @@ function ReaderScreen(props: {
   const searchInputId = useId();
   const searchLabelId = useId();
   const searchStatusId = useId();
+  const bookmarkNoteInputId = useId();
+  const bookmarkNoteHintId = useId();
   const paragraphs = splitIntoParagraphs(props.documentState.text);
   const searchMatches = useMemo(
     () => findParagraphSearchMatches(paragraphs, activeSearchQuery),
@@ -1191,6 +1196,15 @@ function ReaderScreen(props: {
   const currentParagraphPreview = paragraphs[props.currentParagraphIndex]
     ? buildBookmarkPreviewText(paragraphs[props.currentParagraphIndex], 72)
     : null;
+  const currentBookmark =
+    props.bookmarks.find((bookmark) => bookmark.paragraphIndex === props.currentParagraphIndex) ?? null;
+  const bookmarkActionLabel = currentBookmark ? "Update marker" : "Save marker";
+  const bookmarkNoteStatus =
+    currentBookmark?.note
+      ? "This bookmarked paragraph already has a saved note."
+      : currentBookmark
+        ? "This paragraph is bookmarked. Add a short note or leave it blank."
+        : "Saving a marker here can include a short optional note.";
 
   useEffect(() => {
     setBookmarkMessage(
@@ -1200,6 +1214,10 @@ function ReaderScreen(props: {
     );
   }, [props.bookmarks.length, props.documentState.filePath]);
 
+  useEffect(() => {
+    setBookmarkNoteInputValue(currentBookmark?.note ?? "");
+  }, [currentBookmark?.note, props.currentParagraphIndex, props.documentState.filePath]);
+
   function handleAddBookmark() {
     const currentParagraph = paragraphs[props.currentParagraphIndex];
 
@@ -1208,66 +1226,319 @@ function ReaderScreen(props: {
       return;
     }
 
-    props.onAddBookmark(props.currentParagraphIndex, currentParagraph);
-    setBookmarkMessage(`Saved bookmark for paragraph ${props.currentParagraphIndex + 1}.`);
+    const normalizedNote = normalizeBookmarkNote(bookmarkNoteInputValue);
+
+    props.onAddBookmark(props.currentParagraphIndex, currentParagraph, normalizedNote);
+    setBookmarkNoteInputValue(normalizedNote);
+    setBookmarkMessage(
+      normalizedNote
+        ? `Saved bookmark and note for paragraph ${props.currentParagraphIndex + 1}.`
+        : `Saved bookmark for paragraph ${props.currentParagraphIndex + 1}.`
+    );
   }
 
   function handleJumpToBookmark(bookmark: ParagraphBookmark) {
     props.onCurrentParagraphIndexChange(bookmark.paragraphIndex);
-    setBookmarkMessage(`Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}.`);
+    setBookmarkMessage(
+      bookmark.note
+        ? `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}. Note loaded for review.`
+        : `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}.`
+    );
   }
 
   return (
     <section className="reader-workspace" aria-labelledby={headingId}>
-      <section className="reader-toolbar" aria-labelledby={summaryTitleId}>
-        <div className="reader-toolbar-main">
-          <div>
-            <p className="reader-toolbar-label">Reader</p>
-            <h2 id={headingId}>Focused reading workspace</h2>
+      <div className="reader-top-band">
+        <section className="reader-toolbar" aria-labelledby={summaryTitleId}>
+          <div className="reader-toolbar-main">
+            <div>
+              <p className="reader-toolbar-label">Reader</p>
+              <h2 id={headingId}>Focused reading workspace</h2>
+            </div>
+            <button
+              ref={openFileButtonRef}
+              className="primary-button"
+              type="button"
+              onClick={handleOpenFile}
+              disabled={isFilePickerLoading}
+              aria-label={isFilePickerLoading ? "Choosing document" : "Open a study file"}
+            >
+              {isFilePickerLoading ? "Choosing document..." : "Open file"}
+            </button>
           </div>
-          <button
-            ref={openFileButtonRef}
-            className="primary-button"
-            type="button"
-            onClick={handleOpenFile}
-            disabled={isFilePickerLoading}
-            aria-label={isFilePickerLoading ? "Choosing document" : "Open a study file"}
-          >
-            {isFilePickerLoading ? "Choosing document..." : "Open file"}
-          </button>
-        </div>
 
-        <div className="reader-meta" aria-labelledby={summaryTitleId}>
-          <h3 id={summaryTitleId} className="visually-hidden">
-            Reader summary
-          </h3>
-          <p className="reader-file-name">{fileLabel}</p>
-          <div className="reader-meta-row" aria-label="Current reader status">
-            <span className="reader-chip">{fileTypeLabel}</span>
-            <span className="reader-chip">
-              {paragraphs.length > 0
-                ? `Paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}`
-                : "Paragraph 0 of 0"}
-            </span>
-            <span className="reader-chip">
-              {props.documentState.isLoading
-                ? "Loading"
-                : playbackStatusLabel === "waiting for a file"
-                  ? "Ready to load"
-                  : playbackStatusLabel}
-            </span>
+          <div className="reader-meta" aria-labelledby={summaryTitleId}>
+            <h3 id={summaryTitleId} className="visually-hidden">
+              Reader summary
+            </h3>
+            <p className="reader-file-name">{fileLabel}</p>
+            <div className="reader-meta-row" aria-label="Current reader status">
+              <span className="reader-chip">{fileTypeLabel}</span>
+              <span className="reader-chip">
+                {paragraphs.length > 0
+                  ? `Paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}`
+                  : "Paragraph 0 of 0"}
+              </span>
+              <span className="reader-chip">
+                {props.documentState.isLoading
+                  ? "Loading"
+                  : playbackStatusLabel === "waiting for a file"
+                    ? "Ready to load"
+                    : playbackStatusLabel}
+              </span>
+            </div>
+            <p
+              id={statusId}
+              className={
+                props.documentState.error ? "status-message error-text compact-status" : "status-message compact-status"
+              }
+              role={props.documentState.error ? "alert" : "status"}
+              aria-live={props.documentState.error ? "assertive" : "polite"}
+              aria-atomic="true"
+            >
+              {statusMessage}
+            </p>
           </div>
-          <p
-            id={statusId}
-            className={props.documentState.error ? "status-message error-text compact-status" : "status-message compact-status"}
-            role={props.documentState.error ? "alert" : "status"}
-            aria-live={props.documentState.error ? "assertive" : "polite"}
-            aria-atomic="true"
-          >
-            {statusMessage}
-          </p>
+        </section>
+
+        <div className="reader-utility-area" aria-label="Reader tools">
+          <section className="reader-playback-bar" aria-labelledby={shortcutsHintId}>
+            <div className="reader-tool-header">
+              <div>
+                <p className="reader-toolbar-label">Playback</p>
+                <h3>Reading controls</h3>
+              </div>
+            </div>
+            <div className="playback-row" role="group" aria-label="Primary playback actions">
+              <div className="playback-group playback-group-primary">
+                <button
+                  className="playback-primary-button"
+                  type="button"
+                  onClick={handlePlay}
+                  aria-describedby={statusId}
+                >
+                  {playbackState === "paused" ? "Resume" : "Play"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePause}
+                  disabled={!speechSynthesisAvailable || playbackState !== "playing"}
+                >
+                  Pause
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  disabled={!speechSynthesisAvailable || playbackState === "idle"}
+                >
+                  Stop
+                </button>
+              </div>
+              <div className="playback-group" role="group" aria-label="Paragraph navigation">
+                <button
+                  type="button"
+                  onClick={() => moveToParagraph("previous")}
+                  disabled={!hasText || props.currentParagraphIndex === 0}
+                  aria-controls={currentParagraphId}
+                >
+                  Previous paragraph
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveToParagraph("next")}
+                  disabled={!hasText || props.currentParagraphIndex >= paragraphs.length - 1}
+                  aria-controls={currentParagraphId}
+                >
+                  Next paragraph
+                </button>
+                <button type="button" onClick={handleRepeatCurrentParagraph} disabled={!hasText}>
+                  Repeat paragraph
+                </button>
+              </div>
+            </div>
+
+            <div className="playback-secondary-row">
+              <label className="field playback-speed" htmlFor={speedInputId}>
+                <span>Playback speed</span>
+                <input
+                  id={speedInputId}
+                  className="brand-slider"
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.1"
+                  value={props.playbackRate}
+                  onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
+                  aria-describedby={`${statusId} ${speedValueId}`}
+                  aria-valuetext={`${props.playbackRate.toFixed(1)} times speed`}
+                />
+                <span id={speedValueId} className="hint playback-speed-value">
+                  {props.playbackRate.toFixed(1)}x
+                </span>
+              </label>
+
+              <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
+                <button
+                  type="button"
+                  onClick={handleListenForVoiceCommand}
+                  aria-pressed={isListeningForVoiceCommand}
+                  aria-describedby={voiceCommandStatusId}
+                >
+                  {isListeningForVoiceCommand ? "Stop listening" : "Listen for command"}
+                </button>
+                <p id={voiceCommandStatusId} className="hint">
+                  {voiceCommandMessage || voiceRecognitionAvailability.message}
+                </p>
+              </div>
+            </div>
+
+            <div className="playback-readout">
+              <p
+                className={statusToneClass}
+                role={props.documentState.error || !speechSynthesisAvailable ? "alert" : "status"}
+                aria-live={props.documentState.error || !speechSynthesisAvailable ? "assertive" : "polite"}
+                aria-atomic="true"
+              >
+                <strong>Playback:</strong> {playbackStatusLabel}. {playbackMessage}
+              </p>
+              <p
+                id={positionStatusId}
+                className="status-message compact-status"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {paragraphs.length > 0
+                  ? `Position: paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
+                  : "Position: no document loaded."}
+              </p>
+              {voiceStatusMessage ? (
+                <p className="status-message error-text compact-status" role="status" aria-live="polite" aria-atomic="true">
+                  {voiceStatusMessage}
+                </p>
+              ) : null}
+              <p id={shortcutsHintId} className="hint reader-shortcuts-note">
+                Shortcuts: Ctrl+O opens a file anywhere in the app. In Reader, Space plays or pauses, S stops, J and K
+                move between paragraphs, R repeats, and Alt+Up or Alt+Down changes speed.
+              </p>
+              <p className="hint reader-shortcuts-note">
+                Voice commands are optional and listen only after you press `Listen for command`. They use exact English
+                phrases and never replace keyboard shortcuts.
+              </p>
+            </div>
+          </section>
+
+          <div className="reader-secondary-tools">
+            <section className="reader-search-panel" aria-labelledby={searchLabelId}>
+              <div className="reader-tool-header">
+                <div>
+                  <p className="reader-toolbar-label">Search</p>
+                  <h3>Find inside this document</h3>
+                </div>
+              </div>
+              <form className="reader-search-form" onSubmit={handleSearchSubmit}>
+                <label className="field reader-search-field" htmlFor={searchInputId}>
+                  <span id={searchLabelId}>Search this document</span>
+                  <input
+                    ref={searchInputRef}
+                    id={searchInputId}
+                    type="search"
+                    value={searchInputValue}
+                    onChange={(event) => setSearchInputValue(event.target.value)}
+                    placeholder="Find text in this file"
+                    disabled={!hasText || props.documentState.isLoading}
+                    aria-describedby={searchStatusId}
+                  />
+                </label>
+                <div className="reader-search-actions">
+                  <button type="submit" disabled={!hasText || props.documentState.isLoading}>
+                    Search
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSearchStep("previous")}
+                    disabled={searchMatches.length === 0}
+                    aria-controls={currentParagraphId}
+                  >
+                    Previous match
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSearchStep("next")}
+                    disabled={searchMatches.length === 0}
+                    aria-controls={currentParagraphId}
+                  >
+                    Next match
+                  </button>
+                </div>
+              </form>
+              <p
+                id={searchStatusId}
+                className="status-message compact-status"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {searchStatusMessage}
+              </p>
+            </section>
+
+            <section className="reader-bookmarks" aria-labelledby="reader-bookmarks-title">
+              <div className="reader-bookmarks-header">
+                <div>
+                  <p className="reader-toolbar-label">Bookmarks</p>
+                  <h3 id="reader-bookmarks-title">Saved markers for this document</h3>
+                </div>
+                <button type="button" onClick={handleAddBookmark} disabled={!hasText || !props.documentState.filePath}>
+                  {bookmarkActionLabel}
+                </button>
+              </div>
+              <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                {bookmarkMessage}
+              </p>
+              {currentParagraphPreview ? (
+                <p className="hint">Current paragraph preview: {currentParagraphPreview}</p>
+              ) : null}
+              <label className="field bookmark-note-field" htmlFor={bookmarkNoteInputId}>
+                <span>Short note for this bookmarked paragraph</span>
+                <input
+                  id={bookmarkNoteInputId}
+                  type="text"
+                  value={bookmarkNoteInputValue}
+                  onChange={(event) => setBookmarkNoteInputValue(event.target.value)}
+                  maxLength={MAX_BOOKMARK_NOTE_LENGTH}
+                  placeholder="Optional study note"
+                  disabled={!hasText || !props.documentState.filePath}
+                  aria-describedby={bookmarkNoteHintId}
+                />
+              </label>
+              <p id={bookmarkNoteHintId} className="hint">
+                {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note.
+              </p>
+              {props.bookmarks.length > 0 ? (
+                <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
+                  {props.bookmarks.map((bookmark) => (
+                    <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
+                      <button
+                        type="button"
+                        className="bookmark-button"
+                        onClick={() => handleJumpToBookmark(bookmark)}
+                        aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
+                      >
+                        <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
+                        <span className="bookmark-button-preview">{bookmark.previewText}</span>
+                        {bookmark.note ? <span className="bookmark-button-note">Note: {bookmark.note}</span> : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="hint">Bookmarks will appear here after you save one from the current paragraph.</p>
+              )}
+            </section>
+          </div>
         </div>
-      </section>
+      </div>
 
       <section
         ref={readerPanelRef}
@@ -1281,8 +1552,8 @@ function ReaderScreen(props: {
           Document text
         </h3>
         <p id={documentRegionHintId} className="visually-hidden">
-          This region contains the extracted document text. Use the playback and paragraph controls below, or use
-          Reader shortcuts while focus is outside other controls.
+          This region contains the extracted document text. Use the Reader tool area for playback, search, and marker
+          controls, or use Reader shortcuts while focus is outside other controls.
         </p>
         {paragraphs.length > 0 ? (
           <div className="reader-text" role="list" aria-label="Document paragraphs">
@@ -1321,203 +1592,6 @@ function ReaderScreen(props: {
             </p>
           </div>
         )}
-      </section>
-
-      <section className="reader-bookmarks" aria-labelledby="reader-bookmarks-title">
-        <div className="reader-bookmarks-header">
-          <div>
-            <p className="reader-toolbar-label">Bookmarks</p>
-            <h3 id="reader-bookmarks-title">Saved markers for this document</h3>
-          </div>
-          <button type="button" onClick={handleAddBookmark} disabled={!hasText || !props.documentState.filePath}>
-            Bookmark current paragraph
-          </button>
-        </div>
-        <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-          {bookmarkMessage}
-        </p>
-        {currentParagraphPreview ? (
-          <p className="hint">Current paragraph preview: {currentParagraphPreview}</p>
-        ) : null}
-        {props.bookmarks.length > 0 ? (
-          <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
-            {props.bookmarks.map((bookmark) => (
-              <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
-                <button
-                  type="button"
-                  className="bookmark-button"
-                  onClick={() => handleJumpToBookmark(bookmark)}
-                  aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
-                >
-                  <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
-                  <span className="bookmark-button-preview">{bookmark.previewText}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="hint">Bookmarks will appear here after you save one from the current paragraph.</p>
-        )}
-      </section>
-
-      <section className="reader-playback-bar" aria-labelledby={shortcutsHintId}>
-        <div className="playback-group playback-group-primary" role="group" aria-label="Primary playback actions">
-          <button
-            className="playback-primary-button"
-            type="button"
-            onClick={handlePlay}
-            aria-describedby={statusId}
-          >
-            {playbackState === "paused" ? "Resume" : "Play"}
-          </button>
-          <button
-            type="button"
-            onClick={handlePause}
-            disabled={!speechSynthesisAvailable || playbackState !== "playing"}
-          >
-            Pause
-          </button>
-          <button
-            type="button"
-            onClick={handleStop}
-            disabled={!speechSynthesisAvailable || playbackState === "idle"}
-          >
-            Stop
-          </button>
-        </div>
-        <div className="playback-secondary-row">
-          <div className="playback-group" role="group" aria-label="Paragraph navigation">
-            <button
-              type="button"
-              onClick={() => moveToParagraph("previous")}
-              disabled={!hasText || props.currentParagraphIndex === 0}
-              aria-controls={currentParagraphId}
-            >
-              Previous paragraph
-            </button>
-            <button
-              type="button"
-              onClick={() => moveToParagraph("next")}
-              disabled={!hasText || props.currentParagraphIndex >= paragraphs.length - 1}
-              aria-controls={currentParagraphId}
-            >
-              Next paragraph
-            </button>
-            <button type="button" onClick={handleRepeatCurrentParagraph} disabled={!hasText}>
-              Repeat paragraph
-            </button>
-          </div>
-
-          <section className="reader-search-panel" aria-labelledby={searchLabelId}>
-            <form className="reader-search-form" onSubmit={handleSearchSubmit}>
-              <label className="field reader-search-field" htmlFor={searchInputId}>
-                <span id={searchLabelId}>Search this document</span>
-                <input
-                  ref={searchInputRef}
-                  id={searchInputId}
-                  type="search"
-                  value={searchInputValue}
-                  onChange={(event) => setSearchInputValue(event.target.value)}
-                  placeholder="Find text in this file"
-                  disabled={!hasText || props.documentState.isLoading}
-                  aria-describedby={searchStatusId}
-                />
-              </label>
-              <div className="reader-search-actions">
-                <button type="submit" disabled={!hasText || props.documentState.isLoading}>
-                  Search
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSearchStep("previous")}
-                  disabled={searchMatches.length === 0}
-                  aria-controls={currentParagraphId}
-                >
-                  Previous match
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSearchStep("next")}
-                  disabled={searchMatches.length === 0}
-                  aria-controls={currentParagraphId}
-                >
-                  Next match
-                </button>
-              </div>
-            </form>
-            <p id={searchStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-              {searchStatusMessage}
-            </p>
-          </section>
-
-          <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
-            <button
-              type="button"
-              onClick={handleListenForVoiceCommand}
-              aria-pressed={isListeningForVoiceCommand}
-              aria-describedby={voiceCommandStatusId}
-            >
-              {isListeningForVoiceCommand ? "Stop listening" : "Listen for command"}
-            </button>
-            <p id={voiceCommandStatusId} className="hint">
-              {voiceCommandMessage || voiceRecognitionAvailability.message}
-            </p>
-          </div>
-
-          <label className="field playback-speed" htmlFor={speedInputId}>
-            <span>Playback speed</span>
-            <input
-              id={speedInputId}
-              className="brand-slider"
-              type="range"
-              min="0.5"
-              max="2"
-              step="0.1"
-              value={props.playbackRate}
-              onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
-              aria-describedby={`${statusId} ${speedValueId}`}
-              aria-valuetext={`${props.playbackRate.toFixed(1)} times speed`}
-            />
-            <span id={speedValueId} className="hint playback-speed-value">
-              {props.playbackRate.toFixed(1)}x
-            </span>
-          </label>
-
-          <div className="playback-readout">
-            <p
-              className={statusToneClass}
-              role={props.documentState.error || !speechSynthesisAvailable ? "alert" : "status"}
-              aria-live={props.documentState.error || !speechSynthesisAvailable ? "assertive" : "polite"}
-              aria-atomic="true"
-            >
-              <strong>Playback:</strong> {playbackStatusLabel}. {playbackMessage}
-            </p>
-            <p
-              id={positionStatusId}
-              className="status-message compact-status"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {paragraphs.length > 0
-                ? `Position: paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
-                : "Position: no document loaded."}
-            </p>
-            {voiceStatusMessage ? (
-              <p className="status-message error-text compact-status" role="status" aria-live="polite" aria-atomic="true">
-                {voiceStatusMessage}
-              </p>
-            ) : null}
-            <p id={shortcutsHintId} className="hint reader-shortcuts-note">
-              Shortcuts: Ctrl+O opens a file anywhere in the app. In Reader, Space plays or pauses, S stops, J and K
-              move between paragraphs, R repeats, and Alt+Up or Alt+Down changes speed.
-            </p>
-            <p className="hint reader-shortcuts-note">
-              Voice commands are optional and listen only after you press `Listen for command`. They use exact English
-              phrases and never replace keyboard shortcuts.
-            </p>
-          </div>
-        </div>
       </section>
     </section>
   );
@@ -1854,7 +1928,7 @@ export function App() {
     announce("Welcome guidance dismissed.");
   }
 
-  function handleAddBookmark(paragraphIndex: number, paragraphText: string) {
+  function handleAddBookmark(paragraphIndex: number, paragraphText: string, noteText: string) {
     if (!documentState.filePath) {
       return;
     }
@@ -1862,7 +1936,8 @@ export function App() {
     const nextBookmark = createParagraphBookmark({
       documentPath: documentState.filePath,
       paragraphIndex,
-      paragraphText
+      paragraphText,
+      noteText
     });
 
     setBookmarksByDocument((current) => ({
@@ -1872,7 +1947,11 @@ export function App() {
         nextBookmark
       )
     }));
-    announce(`Bookmark saved for paragraph ${paragraphIndex + 1}.`);
+    announce(
+      nextBookmark.note
+        ? `Bookmark and note saved for paragraph ${paragraphIndex + 1}.`
+        : `Bookmark saved for paragraph ${paragraphIndex + 1}.`
+    );
   }
 
   function isActiveLoadRequest(request: ActiveDocumentLoad) {
