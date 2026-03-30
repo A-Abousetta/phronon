@@ -12,8 +12,10 @@ export type ReaderShortcutAction =
   | "nextSearchMatch"
   | "previousSearchMatch"
   | "saveBookmark"
+  | "focusBookmarks"
   | "nextBookmark"
   | "previousBookmark"
+  | "focusHighlights"
   | "nextHighlight"
   | "previousHighlight"
   | "focusReaderText";
@@ -155,6 +157,14 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
     typingBehavior: "ignoreWhileTyping"
   },
   {
+    action: "focusBookmarks",
+    keys: "Ctrl+Shift+B",
+    description: "Focus the bookmarks tool for the current document.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
     action: "nextBookmark",
     keys: "B",
     description: "Jump to the next saved bookmark.",
@@ -166,6 +176,14 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
     action: "previousBookmark",
     keys: "Shift+B",
     description: "Jump to the previous saved bookmark.",
+    groupLabel: "Find and markers",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "focusHighlights",
+    keys: "Ctrl+Shift+H",
+    description: "Focus the highlights tool for the current document.",
     groupLabel: "Find and markers",
     scope: "reader",
     typingBehavior: "ignoreWhileTyping"
@@ -432,6 +450,16 @@ export function getReaderShortcutAction(input: ReaderShortcutInput): ReaderShort
 
   if (input.ctrlKey && !input.metaKey && !input.altKey && !input.shiftKey && normalizedKey === "f") {
     return "focusSearch";
+  }
+
+  if (input.ctrlKey && !input.metaKey && !input.altKey && input.shiftKey) {
+    if (normalizedKey === "b") {
+      return "focusBookmarks";
+    }
+
+    if (normalizedKey === "h") {
+      return "focusHighlights";
+    }
   }
 
   if (!input.ctrlKey && !input.metaKey && !input.altKey && input.shiftKey) {
