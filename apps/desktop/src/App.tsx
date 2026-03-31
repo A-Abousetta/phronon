@@ -184,7 +184,7 @@ const screens: Screen[] = [
     id: "settings",
     label: "Settings",
     title: "Preferences",
-    description: "Adjust language, reading voice placeholders, and interface defaults."
+    description: "Adjust reading comfort, voice behavior, and device readiness."
   }
 ];
 
@@ -267,6 +267,15 @@ function findDirectionalParagraphItemIndex<T extends { paragraphIndex: number }>
 
 const groupedAppShortcuts = groupShortcutDefinitions(appShortcutDefinitions);
 const groupedReaderShortcuts = groupShortcutDefinitions(readerShortcutDefinitions);
+const settingsShortcutGroupLabelMap: Record<string, string> = {
+  Global: "App-wide",
+  Reading: "Reading flow",
+  "Find and markers": "Search, bookmarks, and highlights"
+};
+const groupedSettingsShortcuts = [...groupedAppShortcuts, ...groupedReaderShortcuts].map((group) => ({
+  ...group,
+  settingsLabel: settingsShortcutGroupLabelMap[group.groupLabel]
+}));
 
 function buildLoadedDocumentAnnouncement(result: OpenDocumentSuccessResult, paragraphIndex: number) {
   const paragraphs = splitIntoParagraphs(result.text);
@@ -2500,7 +2509,8 @@ function SettingsScreen(props: {
   runtimeSupportStatus: RuntimeSupportStatus | null;
 }) {
   const settingsTitleId = useId();
-  const languageId = useId();
+  const visibleLanguageId = useId();
+  const visibleLanguageHintId = useId();
   const startupId = useId();
   const interfaceTextScaleId = useId();
   const readerTextScaleId = useId();
@@ -2565,16 +2575,6 @@ function SettingsScreen(props: {
       items: diagnosticsCheckingItems
     }
   ].filter((section) => section.items.length > 0);
-  const settingsShortcutGroups = [
-    ...groupedAppShortcuts.map((group) => ({
-      ...group,
-      settingsLabel: "App-wide"
-    })),
-    ...groupedReaderShortcuts.map((group) => ({
-      ...group,
-      settingsLabel: group.groupLabel === "Reading" ? "Reading flow" : "Search, bookmarks, and highlights"
-    }))
-  ];
   const settingsOverviewItems = [
     {
       title: "Reading comfort",
@@ -2630,20 +2630,25 @@ function SettingsScreen(props: {
               <section className="settings-subsection" aria-labelledby="settings-defaults-title">
                 <div className="settings-subsection-header">
                   <h4 id="settings-defaults-title">App defaults</h4>
-                  <p>Choose the language and starting screen you want Phronon to return to.</p>
+                  <p>Choose the starting screen you want Phronon to return to and keep the current visible app language explicit.</p>
                 </div>
                 <div className="form-grid settings-form-grid" role="group" aria-label="App defaults">
-                  <label className="field" htmlFor={languageId}>
-                    <span>Interface language</span>
-                    <select id={languageId} defaultValue="en">
-                      <option value="en">English</option>
-                      <option value="ar">Arabic</option>
-                    </select>
-                  </label>
+                  <div
+                    className="field settings-static-field"
+                    aria-labelledby={visibleLanguageId}
+                    aria-describedby={visibleLanguageHintId}
+                  >
+                    <span id={visibleLanguageId}>Visible app language</span>
+                    <p className="settings-static-value">English</p>
+                    <p id={visibleLanguageHintId} className="hint">
+                      Home, Reader, and Settings still display in English. Arabic text reading, OCR, and voice support
+                      remain available where supported, but the visible app UI does not switch languages yet.
+                    </p>
+                  </div>
 
                   <label className="field" htmlFor={startupId}>
                     <span>Open on startup</span>
-                    <select id={startupId} defaultValue="home">
+                    <select id={startupId} name="startupScreen" defaultValue="home">
                       <option value="home">Home</option>
                       <option value="reader">Reader</option>
                       <option value="settings">Settings</option>
@@ -2662,6 +2667,7 @@ function SettingsScreen(props: {
                     <span>App text size</span>
                     <select
                       id={interfaceTextScaleId}
+                      name="interfaceTextScale"
                       value={props.interfaceTextScale}
                       onChange={(event) => props.onInterfaceTextScaleChange(parseInterfaceTextScale(event.target.value))}
                       aria-describedby={displayHintId}
@@ -2676,6 +2682,7 @@ function SettingsScreen(props: {
                     <span>Reader text size</span>
                     <select
                       id={readerTextScaleId}
+                      name="readerTextScale"
                       value={props.readerTextScale}
                       onChange={(event) => props.onReaderTextScaleChange(parseReaderTextScale(event.target.value))}
                       aria-describedby={displayHintId}
@@ -2690,6 +2697,7 @@ function SettingsScreen(props: {
                     <span>Contrast</span>
                     <select
                       id={contrastModeId}
+                      name="contrastMode"
                       value={props.contrastMode}
                       onChange={(event) => props.onContrastModeChange(parseContrastMode(event.target.value))}
                       aria-describedby={displayHintId}
@@ -2719,6 +2727,7 @@ function SettingsScreen(props: {
                     <span>Speech voice mode</span>
                     <select
                       id={speechVoiceModeId}
+                      name="speechVoiceMode"
                       value={props.speechVoicePreference}
                       onChange={(event) =>
                         props.onSpeechVoicePreferenceChange(
@@ -2760,6 +2769,7 @@ function SettingsScreen(props: {
                   <span>Preferred playback voice</span>
                   <select
                     id={speechVoiceId}
+                    name="preferredSpeechVoice"
                     value={props.preferredVoiceId ?? ""}
                     onChange={(event) =>
                       props.onPreferredVoiceIdChange(event.target.value.trim() ? event.target.value : null)
@@ -2836,7 +2846,7 @@ function SettingsScreen(props: {
 
             <div className="settings-help-layout">
               <div className="settings-shortcuts-grid">
-                {settingsShortcutGroups.map((shortcutGroup) => (
+                {groupedSettingsShortcuts.map((shortcutGroup) => (
                   <section key={shortcutGroup.settingsLabel} className="settings-shortcut-group">
                     <p className="settings-shortcut-group-label">{shortcutGroup.settingsLabel}</p>
                     <ul className="simple-list" aria-label={`${shortcutGroup.settingsLabel} shortcuts`}>
