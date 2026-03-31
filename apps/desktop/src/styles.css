@@ -221,6 +221,36 @@ select:disabled {
   margin: 0 auto;
 }
 
+.app-brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.app-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0.2rem;
+  border: 1px solid rgba(193, 241, 229, 0.14);
+  border-radius: 1rem;
+  background:
+    radial-gradient(circle at top, rgba(133, 216, 196, 0.14), transparent 65%),
+    linear-gradient(180deg, rgba(25, 39, 37, 0.96), rgba(14, 21, 20, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+.app-brand-mark-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.22));
+}
+
 .app-header-copy {
   display: flex;
   align-items: baseline;
@@ -550,6 +580,13 @@ select:disabled {
   box-shadow: var(--shadow-soft);
 }
 
+.home-launchpad-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+}
+
 .home-launchpad-copy {
   max-width: 44rem;
 }
@@ -564,6 +601,32 @@ select:disabled {
 .home-launchpad-copy .page-banner-text {
   margin-top: 0.55rem;
   max-width: 38rem;
+}
+
+.home-launchpad-brand {
+  justify-self: end;
+}
+
+.home-launchpad-brand-frame {
+  display: grid;
+  place-items: center;
+  width: clamp(7.5rem, 16vw, 10rem);
+  padding: 0.65rem;
+  border: 1px solid rgba(193, 241, 229, 0.1);
+  border-radius: 1.4rem;
+  background:
+    radial-gradient(circle at top, rgba(120, 205, 186, 0.16), transparent 68%),
+    linear-gradient(180deg, rgba(18, 29, 27, 0.94), rgba(12, 18, 17, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 34px rgba(0, 0, 0, 0.18);
+}
+
+.home-launchpad-brand-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.24));
 }
 
 .home-launchpad-actions {
@@ -1088,10 +1151,24 @@ select:disabled {
   display: grid;
   align-content: center;
   justify-items: start;
-  gap: 0.5rem;
+  gap: 0.6rem;
   min-height: 100%;
-  max-width: 34rem;
+  max-width: 40rem;
   padding: 1.2rem 0.2rem;
+}
+
+.reader-empty-illustration {
+  justify-self: center;
+  width: min(100%, clamp(12rem, 26vw, 16rem));
+  margin-bottom: 0.15rem;
+}
+
+.reader-empty-illustration-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 1.6rem;
+  box-shadow: 0 24px 42px rgba(0, 0, 0, 0.22);
 }
 
 .reader-empty-eyebrow {
@@ -1174,7 +1251,28 @@ select:disabled {
 
 .playback-voice-group {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
   align-content: start;
+}
+
+.playback-voice-copy {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.playback-illustration {
+  width: clamp(4.6rem, 8vw, 5.8rem);
+  justify-self: end;
+  align-self: center;
+}
+
+.playback-illustration-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.2));
 }
 
 .playback-voice-group .hint {
@@ -1675,6 +1773,29 @@ select:disabled {
   box-shadow: var(--shadow-inset);
 }
 
+.settings-help-illustration {
+  display: grid;
+  justify-items: center;
+  gap: 0.42rem;
+  padding-bottom: 0.2rem;
+}
+
+.settings-help-illustration-image {
+  display: block;
+  width: min(100%, 10rem);
+  height: auto;
+  filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.2));
+}
+
+.settings-help-illustration-label {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #cff5ec;
+}
+
 .settings-help-region .settings-shortcut-group + .settings-shortcut-group {
   padding-top: 0.9rem;
   border-top: 0;
@@ -1835,6 +1956,7 @@ select:disabled {
   .app-header-copy,
   .page-banner,
   .welcome-panel-header,
+  .home-launchpad-hero,
   .home-primary-action,
   .home-supporting-grid,
   .reader-bookmarks-header,
@@ -1873,6 +1995,15 @@ select:disabled {
   }
 
   .screen-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-launchpad-brand,
+  .playback-illustration {
+    justify-self: start;
+  }
+
+  .playback-voice-group {
     grid-template-columns: 1fr;
   }
 

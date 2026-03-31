@@ -70,6 +70,10 @@ import {
   type VoiceReaderCommand
 } from "./voiceCommands";
 import { buildRuntimeDiagnosticsItems, type RuntimeSupportStatus } from "./runtimeDiagnostics";
+import phrononMasterArtwork from "./assets/images/phronon-master-1024.png";
+import keyboardModeArtwork from "./assets/images/Keyboard mode.png";
+import listeningModeArtwork from "./assets/images/Listening mode.png";
+import readerEmptyStateArtwork from "./assets/images/Empty state (No file loaded).png";
 
 type ScreenId = "home" | "reader" | "settings";
 
@@ -549,12 +553,26 @@ function HomeScreen(props: {
     <section className="page-workspace home-workspace" aria-labelledby={homeTitleId}>
       <div className="home-layout">
         <section className="home-launchpad" aria-labelledby={homeTitleId}>
-          <div className="home-launchpad-copy">
-            <p className="page-banner-label">Home</p>
-            <h2 id={homeTitleId}>Start reading with one clear next step</h2>
-            <p className="page-banner-text">
-              Import a study file, keep your latest material close, and move into Reader without a dashboard detour.
-            </p>
+          <div className="home-launchpad-hero">
+            <div className="home-launchpad-copy">
+              <p className="page-banner-label">Home</p>
+              <h2 id={homeTitleId}>Start reading with one clear next step</h2>
+              <p className="page-banner-text">
+                Import a study file, keep your latest material close, and move into Reader without a dashboard detour.
+              </p>
+            </div>
+            <div className="home-launchpad-brand" aria-hidden="true">
+              <div className="home-launchpad-brand-frame">
+                <img
+                  className="home-launchpad-brand-image"
+                  src={phrononMasterArtwork}
+                  alt=""
+                  width={1024}
+                  height={1024}
+                  decoding="async"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="home-launchpad-actions">
@@ -2096,17 +2114,29 @@ function ReaderScreen(props: {
               </label>
 
               <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
-                <button
-                  type="button"
-                  onClick={handleListenForVoiceCommand}
-                  aria-pressed={isListeningForVoiceCommand}
-                  aria-describedby={voiceCommandStatusId}
-                >
-                  {isListeningForVoiceCommand ? "Stop listening" : "Listen for command"}
-                </button>
-                <p id={voiceCommandStatusId} className="hint">
-                  {voiceCommandMessage || voiceRecognitionAvailability.message}
-                </p>
+                <div className="playback-voice-copy">
+                  <button
+                    type="button"
+                    onClick={handleListenForVoiceCommand}
+                    aria-pressed={isListeningForVoiceCommand}
+                    aria-describedby={voiceCommandStatusId}
+                  >
+                    {isListeningForVoiceCommand ? "Stop listening" : "Listen for command"}
+                  </button>
+                  <p id={voiceCommandStatusId} className="hint">
+                    {voiceCommandMessage || voiceRecognitionAvailability.message}
+                  </p>
+                </div>
+                <div className="playback-illustration" aria-hidden="true">
+                  <img
+                    className="playback-illustration-image"
+                    src={listeningModeArtwork}
+                    alt=""
+                    width={768}
+                    height={768}
+                    decoding="async"
+                  />
+                </div>
               </div>
             </div>
 
@@ -2479,6 +2509,16 @@ function ReaderScreen(props: {
           </div>
         ) : (
           <div className="reader-empty-state">
+            <div className="reader-empty-illustration" aria-hidden="true">
+              <img
+                className="reader-empty-illustration-image"
+                src={readerEmptyStateArtwork}
+                alt=""
+                width={768}
+                height={768}
+                decoding="async"
+              />
+            </div>
             <p className="reader-empty-eyebrow">Ready to read</p>
             <p className="empty-state">Open a readable `.txt` or `.pdf` document to begin.</p>
             <p className="hint">Use `Open file` above or press `Ctrl+O`.</p>
@@ -2861,6 +2901,17 @@ function SettingsScreen(props: {
               </div>
 
               <aside className="settings-help-aside" aria-labelledby="settings-accessibility-title">
+                <div className="settings-help-illustration" aria-hidden="true">
+                  <img
+                    className="settings-help-illustration-image"
+                    src={keyboardModeArtwork}
+                    alt=""
+                    width={768}
+                    height={768}
+                    decoding="async"
+                  />
+                  <p className="settings-help-illustration-label">Keyboard-first by default</p>
+                </div>
                 <div className="settings-subsection-header">
                   <h4 id="settings-accessibility-title">Predictable by design</h4>
                   <p>These core promises keep Settings and Reader calm for keyboard and screen-reader users.</p>
@@ -3415,7 +3466,19 @@ export function App() {
 
       <header className="app-header">
         <div className="app-header-inner">
-          <p className="eyebrow">Phronon</p>
+          <div className="app-brand-lockup">
+            <div className="app-brand-mark" aria-hidden="true">
+              <img
+                className="app-brand-mark-image"
+                src={phrononMasterArtwork}
+                alt=""
+                width={1024}
+                height={1024}
+                decoding="async"
+              />
+            </div>
+            <p className="eyebrow">Phronon</p>
+          </div>
           <div className="app-header-copy">
             <h1 ref={mainHeadingRef} tabIndex={-1}>
               {currentScreen.title}
