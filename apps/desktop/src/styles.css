@@ -515,6 +515,123 @@ select:disabled {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
 }
 
+.home-workspace {
+  gap: 1rem;
+}
+
+.home-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(20rem, 0.92fr);
+  gap: 1.1rem;
+  align-items: start;
+}
+
+.home-launchpad {
+  display: grid;
+  gap: 1rem;
+  padding: 1.35rem 1.4rem;
+  border: 1px solid rgba(193, 241, 229, 0.14);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at right top, rgba(94, 161, 145, 0.1), transparent 16rem),
+    linear-gradient(180deg, rgba(21, 33, 31, 0.98), rgba(13, 20, 19, 0.98));
+  box-shadow: var(--shadow-soft);
+}
+
+.home-launchpad-copy {
+  max-width: 44rem;
+}
+
+.home-launchpad-copy h2 {
+  margin: 0;
+  font-size: clamp(1.34rem, 1.08rem + 0.82vw, 2rem);
+  letter-spacing: -0.03em;
+  color: #f0fffb;
+}
+
+.home-launchpad-copy .page-banner-text {
+  margin-top: 0.55rem;
+  max-width: 38rem;
+}
+
+.home-launchpad-actions {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.home-primary-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(193, 241, 229, 0.08);
+  border-radius: 1.25rem;
+  background: linear-gradient(180deg, rgba(16, 25, 24, 0.96), rgba(12, 18, 17, 0.98));
+  box-shadow: var(--shadow-inset);
+}
+
+.home-primary-action-copy h3,
+.home-status-card .status-message,
+.home-flow-card .panel-kicker {
+  margin-top: 0;
+}
+
+.home-primary-action-copy h3 {
+  margin-bottom: 0.3rem;
+}
+
+.home-primary-action-copy p:last-child {
+  margin: 0;
+}
+
+.home-import-button {
+  min-width: 10.5rem;
+  min-height: 3.2rem;
+}
+
+.home-supporting-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr);
+  gap: 0.9rem;
+}
+
+.home-status-card,
+.home-flow-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(193, 241, 229, 0.08);
+  border-radius: 1.2rem;
+  background: linear-gradient(180deg, rgba(16, 25, 24, 0.92), rgba(11, 17, 16, 0.98));
+  box-shadow: var(--shadow-inset);
+}
+
+.home-status-card .status-message {
+  padding: 0.84rem 0.9rem;
+}
+
+.home-flow-list {
+  gap: 0.45rem;
+  color: var(--text-muted);
+}
+
+.home-flow-list li {
+  padding: 0;
+}
+
+.home-recents {
+  padding: 1.2rem 1.15rem 1.15rem;
+}
+
+.home-recents-header {
+  margin-bottom: 0.9rem;
+}
+
+.home-recent-list {
+  gap: 0.72rem;
+}
+
 .panel-section {
   padding: 1.2rem 1.2rem 1.15rem;
   border-radius: calc(var(--radius-lg) - 0.1rem);
@@ -1381,6 +1498,10 @@ select:disabled {
     grid-template-columns: 13rem minmax(0, 1fr);
   }
 
+  .home-layout {
+    grid-template-columns: 1fr;
+  }
+
   .reader-workspace {
     grid-template-columns: 1fr;
     grid-template-areas:
@@ -1402,6 +1523,8 @@ select:disabled {
   .app-header-copy,
   .page-banner,
   .welcome-panel-header,
+  .home-primary-action,
+  .home-supporting-grid,
   .reader-bookmarks-header,
   .reader-toolbar-main,
   .playback-secondary-row,
@@ -1412,6 +1535,11 @@ select:disabled {
   .layout {
     grid-template-columns: 1fr;
     padding-inline: var(--content-gutter);
+  }
+
+  .home-primary-action,
+  .home-supporting-grid {
+    grid-template-columns: 1fr;
   }
 
   .sidebar {
@@ -1457,6 +1585,7 @@ select:disabled {
   }
 
   .page-banner,
+  .home-launchpad,
   .panel-section,
   .reader-top-band,
   .reader-panel-expanded,
@@ -1474,5 +1603,10 @@ select:disabled {
   .reader-toolbar-main,
   .reader-meta-row {
     align-items: start;
+  }
+
+  .home-import-button {
+    width: 100%;
+    min-width: 0;
   }
 }
