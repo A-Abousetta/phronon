@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   type BrowserSpeechRecognitionConstructor,
+  VOICE_COMMAND_DETECTED_MESSAGE,
+  VOICE_COMMAND_UNAVAILABLE_MESSAGE,
   getVoiceReaderCommand,
   getVoiceRecognitionAvailability,
   normalizeVoiceTranscript
@@ -32,14 +34,12 @@ test("getVoiceRecognitionAvailability reports support clearly", () => {
     getVoiceRecognitionAvailability(mockWindow),
     {
       available: true,
-      message:
-        "Voice command mode is available on this device. It listens only after you press the listen button."
+      message: VOICE_COMMAND_DETECTED_MESSAGE
     }
   );
 
   assert.deepEqual(getVoiceRecognitionAvailability({} as unknown as Window), {
     available: false,
-    message:
-      "Voice command mode is unavailable on this device. Reader voice commands need browser speech recognition support."
+    message: VOICE_COMMAND_UNAVAILABLE_MESSAGE
   });
 });

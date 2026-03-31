@@ -165,6 +165,31 @@ type HighlightRenderSegment = {
   searchMatch: IndexedParagraphSearchMatch | null;
 };
 
+type VoiceCommandPhase =
+  | "idle"
+  | "starting"
+  | "listening"
+  | "heardNothing"
+  | "noMatch"
+  | "permissionDenied"
+  | "unsupported"
+  | "interrupted";
+
+type VoiceCommandTrustState = "unsupported" | "detected" | "confirmed" | "unreliable";
+
+type VoiceCommandSession = {
+  attemptId: number;
+  requestedAt: number;
+  recognitionStartedAt: number | null;
+  audioStartedAt: number | null;
+  speechStartedAt: number | null;
+  finalStateReached: boolean;
+  resultHandled: boolean;
+  matchedCommand: boolean;
+  manualStop: boolean;
+  transcripts: string[];
+};
+
 type WelcomePanelProps = {
   onOpenDocument: () => Promise<void>;
   onDismiss: () => void;
@@ -276,10 +301,50 @@ const settingsShortcutGroupLabelMap: Record<string, string> = {
   Reading: "Reading flow",
   "Find and markers": "Search, bookmarks, and highlights"
 };
+
+const voiceCommandEarlyEndThresholdMs = 900;
 const groupedSettingsShortcuts = [...groupedAppShortcuts, ...groupedReaderShortcuts].map((group) => ({
   ...group,
   settingsLabel: settingsShortcutGroupLabelMap[group.groupLabel]
 }));
+const readerVoiceCommandLabels = [
+  "Open file",
+  "Play",
+  "Pause",
+  "Stop",
+  "Next paragraph",
+  "Previous paragraph",
+  "Repeat paragraph",
+  "Faster",
+  "Slower"
+] as const;
+const readerToolJumpTargets = [
+  {
+    id: "playback",
+    label: "Playback"
+  },
+  {
+    id: "voice",
+    label: "Voice"
+  },
+  {
+    id: "search",
+    label: "Search"
+  },
+  {
+    id: "highlights",
+    label: "Highlights"
+  },
+  {
+    id: "bookmarks",
+    label: "Bookmarks"
+  },
+  {
+    id: "help",
+    label: "Help"
+  }
+] as const;
+type ReaderToolJumpTarget = (typeof readerToolJumpTargets)[number]["id"];
 
 function buildLoadedDocumentAnnouncement(result: OpenDocumentSuccessResult, paragraphIndex: number) {
   const paragraphs = splitIntoParagraphs(result.text);
@@ -689,7 +754,7 @@ function ReaderScreen(props: {
   const [playbackMessage, setPlaybackMessage] = useState("Load a .txt or .pdf file to start playback.");
   const [bookmarkMessage, setBookmarkMessage] = useState("No bookmarks saved for this document yet.");
   const [voiceCommandMessage, setVoiceCommandMessage] = useState("");
-  const [isListeningForVoiceCommand, setIsListeningForVoiceCommand] = useState(false);
+  const [voiceCommandPhase, setVoiceCommandPhase] = useState<VoiceCommandPhase>("idle");
   const [searchInputValue, setSearchInputValue] = useState("");
   const [activeSearchQuery, setActiveSearchQuery] = useState("");
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
@@ -700,12 +765,17 @@ function ReaderScreen(props: {
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voiceRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const voiceCommandSessionRef = useRef<VoiceCommandSession | null>(null);
+  const nextVoiceCommandAttemptIdRef = useRef(0);
   const paragraphRefs = useRef<Array<HTMLElement | null>>([]);
   const searchMatchRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const bookmarkButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const highlightOpenButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const readerPanelRef = useRef<HTMLDivElement | null>(null);
   const openFileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const playButtonRef = useRef<HTMLButtonElement | null>(null);
+  const voiceCommandButtonRef = useRef<HTMLButtonElement | null>(null);
+  const shortcutsSummaryRef = useRef<HTMLElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const bookmarkNoteInputRef = useRef<HTMLInputElement | null>(null);
   const highlightNoteInputRef = useRef<HTMLInputElement | null>(null);
@@ -726,9 +796,12 @@ function ReaderScreen(props: {
   const shortcutsHintId = useId();
   const documentRegionTitleId = useId();
   const documentRegionHintId = useId();
+  const toolSuiteTitleId = useId();
+  const toolSuiteDescriptionId = useId();
   const speedInputId = useId();
   const speedValueId = useId();
   const voiceCommandStatusId = useId();
+  const voiceCommandSupportId = useId();
   const searchInputId = useId();
   const searchLabelId = useId();
   const searchStatusId = useId();
@@ -750,11 +823,22 @@ function ReaderScreen(props: {
   const isFilePickerLoading = props.activeLoad?.origin === "filePicker";
   const voiceRecognitionAvailability = getVoiceRecognitionAvailability(window);
   const voiceRecognitionAvailable = voiceRecognitionAvailability.available;
+  const [voiceCommandTrustState, setVoiceCommandTrustState] = useState<VoiceCommandTrustState>(
+    voiceRecognitionAvailable ? "detected" : "unsupported"
+  );
+  const isListeningForVoiceCommand = voiceCommandPhase === "starting" || voiceCommandPhase === "listening";
   const activeSearchMatch =
     activeSearchMatchIndex >= 0 && activeSearchMatchIndex < searchMatches.length
       ? searchMatches[activeSearchMatchIndex]
       : null;
   const matchedParagraphCount = searchMatchesByParagraph.size;
+  const voiceCommandIdleMessage = !voiceRecognitionAvailable
+    ? voiceRecognitionAvailability.message
+    : voiceCommandTrustState === "confirmed"
+      ? "Experimental voice commands listened successfully in this session. They still accept one exact English Reader command per press, and keyboard shortcuts remain the reliable primary workflow."
+      : voiceCommandTrustState === "unreliable"
+        ? "Speech recognition was detected, but listening has been ending too early in this Electron environment to trust voice commands here. Keyboard shortcuts remain the reliable primary workflow."
+        : `${voiceRecognitionAvailability.message} Keyboard shortcuts remain the reliable primary workflow.`;
   const searchStatusMessage =
     props.documentState.isLoading
       ? "Search will be available when the document finishes loading."
@@ -771,6 +855,29 @@ function ReaderScreen(props: {
   function focusParagraph(paragraphIndex: number) {
     readerPanelRef.current?.focus();
     paragraphRefs.current[paragraphIndex]?.focus();
+  }
+
+  function focusReaderToolTarget(target: ReaderToolJumpTarget) {
+    switch (target) {
+      case "playback":
+        playButtonRef.current?.focus();
+        return;
+      case "voice":
+        voiceCommandButtonRef.current?.focus();
+        return;
+      case "search":
+        searchInputRef.current?.focus();
+        return;
+      case "highlights":
+        highlightSectionRef.current?.focus();
+        return;
+      case "bookmarks":
+        bookmarkSectionRef.current?.focus();
+        return;
+      case "help":
+        shortcutsSummaryRef.current?.focus();
+        return;
+    }
   }
 
   function buildSearchResultAnnouncement(matchIndex: number, matches = searchMatches) {
@@ -791,22 +898,71 @@ function ReaderScreen(props: {
     return `Highlight ${highlightIndex + 1} of ${props.highlights.length} in paragraph ${highlight.paragraphIndex + 1}. Reader text focused${highlight.note ? ". Note loaded." : "."}`;
   }
 
-  function stopVoiceCommandListening(message?: string) {
-    const recognition = voiceRecognitionRef.current;
+  function logVoiceCommandDiagnostic(eventName: string, details?: Record<string, unknown>) {
+    console.info("[Reader voice command]", eventName, details ?? {});
+  }
+
+  function clearVoiceRecognitionHandlers(recognition: BrowserSpeechRecognition) {
+    recognition.onaudiostart = null;
+    recognition.onend = null;
+    recognition.onnomatch = null;
+    recognition.onerror = null;
+    recognition.onresult = null;
+    recognition.onspeechstart = null;
+    recognition.onstart = null;
+  }
+
+  function completeVoiceCommandSession(
+    phase: VoiceCommandPhase,
+    message: string,
+    options?: {
+      method?: "stop" | "abort" | "detachOnly";
+      trustState?: VoiceCommandTrustState;
+      recognition?: BrowserSpeechRecognition | null;
+    }
+  ) {
+    const recognition = options?.recognition ?? voiceRecognitionRef.current;
+    const method = options?.method ?? "stop";
+    const session = voiceCommandSessionRef.current;
+
+    if (session) {
+      session.finalStateReached = true;
+    }
 
     if (recognition) {
-      recognition.onresult = null;
-      recognition.onerror = null;
-      recognition.onend = null;
-      recognition.stop();
+      clearVoiceRecognitionHandlers(recognition);
+
+      if (method === "stop") {
+        try {
+          recognition.stop();
+        } catch {
+          // Some runtimes throw if recognition already ended.
+        }
+      } else if (method === "abort") {
+        try {
+          recognition.abort();
+        } catch {
+          // Some runtimes throw if recognition already ended.
+        }
+      }
+    }
+
+    if (!options?.recognition || options.recognition === voiceRecognitionRef.current) {
       voiceRecognitionRef.current = null;
     }
 
-    setIsListeningForVoiceCommand(false);
-
-    if (message) {
-      setVoiceCommandMessage(message);
+    if (options?.trustState) {
+      setVoiceCommandTrustState(options.trustState);
     }
+
+    setVoiceCommandPhase(phase);
+    setVoiceCommandMessage(message);
+    logVoiceCommandDiagnostic("status", {
+      attemptId: session?.attemptId ?? null,
+      phase,
+      trustState: options?.trustState ?? null,
+      message
+    });
   }
 
   function renderParagraphText(paragraph: string, paragraphIndex: number) {
@@ -1042,7 +1198,9 @@ function ReaderScreen(props: {
 
   useEffect(() => {
     return () => {
-      stopVoiceCommandListening();
+      completeVoiceCommandSession("idle", "", {
+        method: "abort"
+      });
       playbackSessionRef.current += 1;
       playbackRangeRef.current = null;
       playbackPositionRef.current = null;
@@ -1331,66 +1489,304 @@ function ReaderScreen(props: {
 
   function handleListenForVoiceCommand() {
     if (!voiceRecognitionAvailable) {
+      setVoiceCommandTrustState("unsupported");
+      setVoiceCommandPhase("unsupported");
       setVoiceCommandMessage(voiceRecognitionAvailability.message);
       return;
     }
 
     if (isListeningForVoiceCommand) {
-      stopVoiceCommandListening("Voice command listening stopped.");
+      const activeSession = voiceCommandSessionRef.current;
+
+      if (activeSession) {
+        activeSession.manualStop = true;
+      }
+
+      completeVoiceCommandSession(
+        "idle",
+        "Voice command listening stopped before a command was captured.",
+        {
+          method: "abort"
+        }
+      );
       return;
     }
 
     const SpeechRecognitionConstructor = getVoiceRecognitionConstructor(window);
 
     if (!SpeechRecognitionConstructor) {
+      setVoiceCommandTrustState("unsupported");
+      setVoiceCommandPhase("unsupported");
       setVoiceCommandMessage(voiceRecognitionAvailability.message);
       return;
     }
 
     const recognition = new SpeechRecognitionConstructor();
+    const nextAttemptId = nextVoiceCommandAttemptIdRef.current + 1;
+    const session: VoiceCommandSession = {
+      attemptId: nextAttemptId,
+      requestedAt: Date.now(),
+      recognitionStartedAt: null,
+      audioStartedAt: null,
+      speechStartedAt: null,
+      finalStateReached: false,
+      resultHandled: false,
+      matchedCommand: false,
+      manualStop: false,
+      transcripts: []
+    };
 
+    nextVoiceCommandAttemptIdRef.current = nextAttemptId;
+    voiceCommandSessionRef.current = session;
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = "en-US";
     recognition.maxAlternatives = 5;
+    recognition.onstart = () => {
+      session.recognitionStartedAt = Date.now();
+      setVoiceCommandPhase("listening");
+      setVoiceCommandMessage(
+        "Voice command started. Listening now for one exact English Reader command."
+      );
+      logVoiceCommandDiagnostic("started", {
+        attemptId: session.attemptId
+      });
+    };
+    recognition.onaudiostart = () => {
+      session.audioStartedAt = Date.now();
+      logVoiceCommandDiagnostic("audio-start", {
+        attemptId: session.attemptId
+      });
+    };
+    recognition.onspeechstart = () => {
+      session.speechStartedAt = Date.now();
+      logVoiceCommandDiagnostic("speech-start", {
+        attemptId: session.attemptId
+      });
+    };
     recognition.onresult = (event: BrowserSpeechRecognitionEvent) => {
       const result = event.results[event.resultIndex];
-      const transcript = result?.[0]?.transcript ?? "";
-      const command = getVoiceReaderCommand(transcript);
+      const commandAlternatives = result
+        ? Array.from({ length: result.length }, (_, alternativeIndex) => result[alternativeIndex]?.transcript ?? "")
+        : [];
+      const heardTranscript = commandAlternatives.find((transcript) => transcript.trim()) ?? "";
+      const command = commandAlternatives
+        .map((transcript) => getVoiceReaderCommand(transcript))
+        .find((supportedCommand): supportedCommand is VoiceReaderCommand => supportedCommand !== null);
+
+      session.resultHandled = true;
+      session.transcripts = commandAlternatives.filter((transcript) => transcript.trim().length > 0);
+      logVoiceCommandDiagnostic("result", {
+        attemptId: session.attemptId,
+        transcripts: session.transcripts
+      });
 
       if (!command) {
-        stopVoiceCommandListening(
-          "Voice command was not recognized. Supported commands are open file, play, pause, stop, next paragraph, previous paragraph, repeat paragraph, faster, and slower."
+        completeVoiceCommandSession(
+          "noMatch",
+          heardTranscript
+            ? `Voice command heard "${heardTranscript}", but it did not match a supported Reader command. Use one exact phrase from the list below.`
+            : "Voice command heard speech, but no supported Reader command matched. Use one exact phrase from the list below.",
+          {
+            method: "abort",
+            recognition,
+            trustState: "confirmed"
+          }
         );
         return;
       }
 
-      stopVoiceCommandListening();
+      session.matchedCommand = true;
+      completeVoiceCommandSession("idle", `Voice command heard: ${heardTranscript || command}.`, {
+        method: "abort",
+        recognition,
+        trustState: "confirmed"
+      });
       executeVoiceReaderCommand(command);
     };
+    recognition.onnomatch = () => {
+      logVoiceCommandDiagnostic("no-match", {
+        attemptId: session.attemptId
+      });
+      completeVoiceCommandSession(
+        "noMatch",
+        "Voice command heard speech, but no supported Reader command matched. Use one exact phrase from the list below.",
+        {
+          method: "abort",
+          recognition,
+          trustState: "confirmed"
+        }
+      );
+    };
     recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
-      stopVoiceCommandListening(
-        event.error === "not-allowed"
-          ? "Microphone permission was denied, so voice command mode could not start."
-          : "Voice command listening failed on this device."
+      const elapsedSinceStart =
+        session.recognitionStartedAt === null ? 0 : Date.now() - session.recognitionStartedAt;
+      const trustState =
+        event.error === "audio-capture" || event.error === "language-not-supported"
+          ? "unsupported"
+          : event.error === "not-allowed" || event.error === "service-not-allowed"
+            ? "detected"
+            : session.recognitionStartedAt === null || elapsedSinceStart < voiceCommandEarlyEndThresholdMs
+              ? "unreliable"
+              : "confirmed";
+
+      logVoiceCommandDiagnostic("error", {
+        attemptId: session.attemptId,
+        error: event.error,
+        message: event.message ?? null,
+        elapsedSinceStart
+      });
+
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        completeVoiceCommandSession(
+          "permissionDenied",
+          "Microphone permission was denied, so voice command listening could not stay active.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState
+          }
+        );
+        return;
+      }
+
+      if (event.error === "no-speech") {
+        completeVoiceCommandSession(
+          "heardNothing",
+          "Voice command listening started, but heard nothing before it ended. Try again closer to the microphone, or use keyboard shortcuts.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState
+          }
+        );
+        return;
+      }
+
+      if (event.error === "audio-capture" || event.error === "language-not-supported") {
+        completeVoiceCommandSession(
+          "unsupported",
+          "Speech recognition is present, but this device could not capture usable microphone input for Reader voice commands.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState
+          }
+        );
+        return;
+      }
+
+      if (event.error === "aborted" && session.manualStop) {
+        completeVoiceCommandSession(
+          "idle",
+          "Voice command listening stopped before a command was captured.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState
+          }
+        );
+        return;
+      }
+
+      completeVoiceCommandSession(
+        "interrupted",
+        "Voice command listening was interrupted before a command was captured. This Electron/browser speech-recognition runtime may be unreliable on this device.",
+        {
+          method: "detachOnly",
+          recognition,
+          trustState
+        }
       );
     };
     recognition.onend = () => {
-      voiceRecognitionRef.current = null;
-      setIsListeningForVoiceCommand(false);
+      const elapsedSinceStart =
+        session.recognitionStartedAt === null ? 0 : Date.now() - session.recognitionStartedAt;
+
+      logVoiceCommandDiagnostic("ended", {
+        attemptId: session.attemptId,
+        elapsedSinceStart,
+        resultHandled: session.resultHandled,
+        matchedCommand: session.matchedCommand,
+        manualStop: session.manualStop,
+        transcripts: session.transcripts
+      });
+
+      if (session.finalStateReached) {
+        voiceRecognitionRef.current = null;
+        return;
+      }
+
+      if (session.manualStop) {
+        completeVoiceCommandSession(
+          "idle",
+          "Voice command listening stopped before a command was captured.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState: voiceCommandTrustState
+          }
+        );
+        return;
+      }
+
+      if (session.recognitionStartedAt === null || elapsedSinceStart < voiceCommandEarlyEndThresholdMs) {
+        completeVoiceCommandSession(
+          "interrupted",
+          "Voice command listening ended almost immediately, so Phronon is treating this speech-recognition environment as unreliable on this device.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState: "unreliable"
+          }
+        );
+        return;
+      }
+
+      if (!session.resultHandled && session.speechStartedAt === null) {
+        completeVoiceCommandSession(
+          "heardNothing",
+          "Voice command listening started, but heard nothing before it ended. Try again closer to the microphone, or use keyboard shortcuts.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState: "confirmed"
+          }
+        );
+        return;
+      }
+
+      completeVoiceCommandSession(
+        "noMatch",
+        "Voice command listening heard speech, but no supported Reader command matched. Use one exact phrase from the list below.",
+        {
+          method: "detachOnly",
+          recognition,
+          trustState: "confirmed"
+        }
+      );
     };
 
     try {
       voiceRecognitionRef.current = recognition;
-      setIsListeningForVoiceCommand(true);
+      setVoiceCommandPhase("starting");
       setVoiceCommandMessage(
-        "Listening for one Reader command. Say open file, play, pause, stop, next paragraph, previous paragraph, repeat paragraph, faster, or slower."
+        "Starting voice command listening. Phronon will confirm once the microphone stays active long enough to use."
       );
+      logVoiceCommandDiagnostic("start-requested", {
+        attemptId: session.attemptId
+      });
       recognition.start();
     } catch {
-      voiceRecognitionRef.current = null;
-      setIsListeningForVoiceCommand(false);
-      setVoiceCommandMessage("Voice command listening could not start on this device.");
+      completeVoiceCommandSession(
+        "unsupported",
+        "Voice command listening could not start on this device. Speech recognition was detected, but this Electron/browser environment did not keep it active.",
+        {
+          method: "detachOnly",
+          recognition,
+          trustState: "unreliable"
+        }
+      );
     }
   }
 
@@ -2038,6 +2434,22 @@ function ReaderScreen(props: {
         </section>
 
         <div className="reader-utility-area" aria-label="Reader tools">
+          <nav className="reader-tool-jump-nav" aria-label="Jump between Reader tools">
+            <p className="reader-tool-jump-label">Jump to</p>
+            <div className="reader-tool-jump-list">
+              {readerToolJumpTargets.map((jumpTarget) => (
+                <button
+                  key={jumpTarget.id}
+                  className="reader-tool-jump-button"
+                  type="button"
+                  onClick={() => focusReaderToolTarget(jumpTarget.id)}
+                >
+                  {jumpTarget.label}
+                </button>
+              ))}
+            </div>
+          </nav>
+
           <section className="reader-playback-bar" aria-labelledby={shortcutsHintId}>
             <div className="reader-tool-header">
               <div>
@@ -2048,6 +2460,7 @@ function ReaderScreen(props: {
             <div className="playback-row" role="group" aria-label="Primary playback actions">
               <div className="playback-group playback-group-primary">
                 <button
+                  ref={playButtonRef}
                   className="playback-primary-button"
                   type="button"
                   onClick={handlePlay}
@@ -2116,15 +2529,20 @@ function ReaderScreen(props: {
               <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
                 <div className="playback-voice-copy">
                   <button
+                    ref={voiceCommandButtonRef}
                     type="button"
                     onClick={handleListenForVoiceCommand}
                     aria-pressed={isListeningForVoiceCommand}
-                    aria-describedby={voiceCommandStatusId}
+                    aria-describedby={`${voiceCommandStatusId} ${voiceCommandSupportId}`}
                   >
-                    {isListeningForVoiceCommand ? "Stop listening" : "Listen for command"}
+                    {isListeningForVoiceCommand ? "Stop listening" : "Listen for one command"}
                   </button>
-                  <p id={voiceCommandStatusId} className="hint">
-                    {voiceCommandMessage || voiceRecognitionAvailability.message}
+                  <p id={voiceCommandStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                    {voiceCommandMessage || voiceCommandIdleMessage}
+                  </p>
+                  <p id={voiceCommandSupportId} className="hint playback-voice-note">
+                    Experimental. One exact English phrase per press. Keyboard shortcuts and screen readers remain the
+                    reliable primary controls.
                   </p>
                 </div>
                 <div className="playback-illustration" aria-hidden="true">
@@ -2171,7 +2589,13 @@ function ReaderScreen(props: {
                   opens bookmarks, `Ctrl+Shift+H` opens highlights, and `Escape` returns to the document.
                 </p>
                 <details className="reader-shortcuts-details">
-                  <summary id={shortcutsReferenceId} className="reader-shortcuts-summary">
+                  <summary
+                    ref={(element) => {
+                      shortcutsSummaryRef.current = element;
+                    }}
+                    id={shortcutsReferenceId}
+                    className="reader-shortcuts-summary"
+                  >
                     Show full Reader shortcut help
                   </summary>
                   <div className="reader-shortcuts-reference" aria-labelledby={shortcutsReferenceId}>
@@ -2210,230 +2634,259 @@ function ReaderScreen(props: {
                 </details>
               </div>
               <p className="hint reader-shortcuts-note">
-                Voice commands are optional and listen only after you press `Listen for command`. They use exact English
-                phrases and never replace keyboard shortcuts.
+                Voice commands stay optional and experimental. They never replace keyboard shortcuts for reliable Reader
+                control.
               </p>
+              <details className="reader-shortcuts-details reader-voice-commands-details">
+                <summary className="reader-shortcuts-summary">Show supported voice commands</summary>
+                <div className="reader-shortcuts-reference" aria-label="Supported voice commands">
+                  <p className="hint reader-shortcuts-note">
+                    Voice commands work only after you press `Listen for one command`, and they only respond to exact
+                    English phrases.
+                  </p>
+                  <ul className="simple-list reader-voice-command-list" aria-label="Supported Reader voice commands">
+                    {readerVoiceCommandLabels.map((commandLabel) => (
+                      <li key={commandLabel}>
+                        <strong>{commandLabel}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
             </div>
           </section>
 
-          <div className="reader-secondary-tools">
-            <section className="reader-search-panel" aria-labelledby={searchLabelId}>
-              <div className="reader-tool-header">
-                <div>
-                  <p className="reader-toolbar-label">Search</p>
-                  <h3>Find inside this document</h3>
-                </div>
+          <section className="reader-tool-suite" aria-labelledby={toolSuiteTitleId} aria-describedby={toolSuiteDescriptionId}>
+            <div className="reader-tool-suite-header">
+              <div>
+                <p className="reader-toolbar-label">Study tools</p>
+                <h3 id={toolSuiteTitleId}>Find, mark, and revisit</h3>
               </div>
-              <form className="reader-search-form" onSubmit={handleSearchSubmit}>
-                <label className="field reader-search-field" htmlFor={searchInputId}>
-                  <span id={searchLabelId}>Search this document</span>
+              <p id={toolSuiteDescriptionId}>Search, highlights, and bookmarks stay together here so the rail scans faster.</p>
+            </div>
+
+            <div className="reader-suite-sections">
+              <section className="reader-search-panel reader-suite-section" aria-labelledby={searchLabelId}>
+                <div className="reader-tool-header">
+                  <div>
+                    <p className="reader-toolbar-label">Search</p>
+                    <h3>Find inside this document</h3>
+                  </div>
+                </div>
+                <form className="reader-search-form" onSubmit={handleSearchSubmit}>
+                  <label className="field reader-search-field" htmlFor={searchInputId}>
+                    <span id={searchLabelId}>Search this document</span>
                   <input
                     ref={searchInputRef}
                     id={searchInputId}
+                    name="documentSearch"
                     type="search"
                     value={searchInputValue}
                     onChange={(event) => setSearchInputValue(event.target.value)}
-                    placeholder="Find text in this file"
-                    disabled={!hasText || props.documentState.isLoading}
-                    aria-describedby={searchStatusId}
+                      placeholder="Find text in this file"
+                      disabled={!hasText || props.documentState.isLoading}
+                      aria-describedby={searchStatusId}
+                    />
+                  </label>
+                  <div className="reader-search-actions">
+                    <button type="submit" disabled={!hasText || props.documentState.isLoading}>
+                      Search
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSearchStep("previous")}
+                      disabled={searchMatches.length === 0}
+                      aria-controls={currentParagraphId}
+                    >
+                      Previous match
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSearchStep("next")}
+                      disabled={searchMatches.length === 0}
+                      aria-controls={currentParagraphId}
+                    >
+                      Next match
+                    </button>
+                  </div>
+                </form>
+                <p
+                  id={searchStatusId}
+                  className="status-message compact-status"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  {searchStatusMessage}
+                </p>
+                <p className="hint">Press `Escape` from the search field to return to the document text.</p>
+              </section>
+
+              <section
+                ref={highlightSectionRef}
+                className="reader-highlights reader-suite-section"
+                aria-labelledby="reader-highlights-title"
+                tabIndex={-1}
+              >
+                <div className="reader-bookmarks-header">
+                  <div>
+                    <p className="reader-toolbar-label">Highlights</p>
+                    <h3 id="reader-highlights-title">Short text highlights</h3>
+                  </div>
+                  <div className="reader-highlight-actions">
+                    <button
+                      ref={highlightSaveButtonRef}
+                      type="button"
+                      onClick={handleSaveHighlight}
+                      disabled={!hasText || !props.documentState.filePath || !selectedTextRange}
+                    >
+                      {highlightActionLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemoveHighlight}
+                      disabled={!activeHighlight && !selectedExistingHighlight}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+                <p id={highlightStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                  {highlightMessage}
+                </p>
+                <p className="hint">{highlightStatusText}</p>
+                <label className="field bookmark-note-field" htmlFor={highlightNoteInputId}>
+                  <span>Short note for this highlight</span>
+                  <input
+                    ref={highlightNoteInputRef}
+                    id={highlightNoteInputId}
+                    name="highlightNote"
+                    type="text"
+                    value={highlightNoteInputValue}
+                    onChange={(event) => setHighlightNoteInputValue(event.target.value)}
+                    maxLength={MAX_HIGHLIGHT_NOTE_LENGTH}
+                    placeholder="Optional note"
+                    disabled={!hasText || (!selectedTextRange && !activeHighlight)}
+                    aria-describedby={highlightNoteHintId}
                   />
                 </label>
-                <div className="reader-search-actions">
-                  <button type="submit" disabled={!hasText || props.documentState.isLoading}>
-                    Search
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSearchStep("previous")}
-                    disabled={searchMatches.length === 0}
-                    aria-controls={currentParagraphId}
-                  >
-                    Previous match
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSearchStep("next")}
-                    disabled={searchMatches.length === 0}
-                    aria-controls={currentParagraphId}
-                  >
-                    Next match
-                  </button>
-                </div>
-              </form>
-              <p
-                id={searchStatusId}
-                className="status-message compact-status"
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                {searchStatusMessage}
-              </p>
-              <p className="hint">Press `Escape` from the search field to return to the document text.</p>
-            </section>
+                <p id={highlightNoteHintId} className="hint">
+                  Keep highlight notes short. Select text to save a new one, or open a saved highlight to edit it.
+                  Press `Escape` to return to the document text.
+                </p>
+                {props.highlights.length > 0 ? (
+                  <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
+                    {props.highlights.map((highlight, highlightIndex) => (
+                      <li key={highlight.id} className="bookmark-list-item highlight-list-item">
+                        <div
+                          className={
+                            highlight.id === activeHighlightId ? "bookmark-button highlight-card highlight-card-active" : "bookmark-button highlight-card"
+                          }
+                        >
+                          <button
+                            ref={(element) => {
+                              highlightOpenButtonRefs.current[highlightIndex] = element;
+                            }}
+                            type="button"
+                            className="highlight-card-open"
+                            onClick={() => handleJumpToHighlight(highlight, highlightIndex)}
+                            aria-controls={`reader-paragraph-${highlight.paragraphIndex}`}
+                          >
+                            <span className="bookmark-button-title">Paragraph {highlight.paragraphIndex + 1}</span>
+                            <span className="bookmark-button-preview">{highlight.previewText}</span>
+                            {highlight.note ? <span className="bookmark-button-note">Note: {highlight.note}</span> : null}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button highlight-card-remove"
+                            onClick={() => {
+                              setActiveHighlightId(highlight.id);
+                              setHighlightNoteInputValue(highlight.note);
+                              props.onRemoveHighlight(highlight.id);
+                              setActiveHighlightId(null);
+                              setSelectedTextRange(null);
+                              clearBrowserSelection();
+                              setHighlightMessage(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
+                              props.onAnnounce(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="hint">Highlights will appear here after you select text and save one.</p>
+                )}
+              </section>
 
-            <section
-              ref={highlightSectionRef}
-              className="reader-highlights"
-              aria-labelledby="reader-highlights-title"
-              tabIndex={-1}
-            >
-              <div className="reader-bookmarks-header">
-                <div>
-                  <p className="reader-toolbar-label">Highlights</p>
-                  <h3 id="reader-highlights-title">Short text highlights</h3>
-                </div>
-                <div className="reader-highlight-actions">
-                  <button
-                    ref={highlightSaveButtonRef}
-                    type="button"
-                    onClick={handleSaveHighlight}
-                    disabled={!hasText || !props.documentState.filePath || !selectedTextRange}
-                  >
-                    {highlightActionLabel}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleRemoveHighlight}
-                    disabled={!activeHighlight && !selectedExistingHighlight}
-                  >
-                    Remove
+              <section
+                ref={bookmarkSectionRef}
+                className="reader-bookmarks reader-suite-section"
+                aria-labelledby="reader-bookmarks-title"
+                tabIndex={-1}
+              >
+                <div className="reader-bookmarks-header">
+                  <div>
+                    <p className="reader-toolbar-label">Bookmarks</p>
+                    <h3 id="reader-bookmarks-title">Saved markers for this document</h3>
+                  </div>
+                  <button type="button" onClick={handleAddBookmark} disabled={!hasText || !props.documentState.filePath}>
+                    {bookmarkActionLabel}
                   </button>
                 </div>
-              </div>
-              <p id={highlightStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-                {highlightMessage}
-              </p>
-              <p className="hint">{highlightStatusText}</p>
-              <label className="field bookmark-note-field" htmlFor={highlightNoteInputId}>
-                <span>Short note for this highlight</span>
-                <input
-                  ref={highlightNoteInputRef}
-                  id={highlightNoteInputId}
-                  type="text"
-                  value={highlightNoteInputValue}
-                  onChange={(event) => setHighlightNoteInputValue(event.target.value)}
-                  maxLength={MAX_HIGHLIGHT_NOTE_LENGTH}
-                  placeholder="Optional note"
-                  disabled={!hasText || (!selectedTextRange && !activeHighlight)}
-                  aria-describedby={highlightNoteHintId}
-                />
-              </label>
-              <p id={highlightNoteHintId} className="hint">
-                Keep highlight notes short. Select text to save a new highlight, or load a saved one to edit its note.
-                Press `Escape` here to return to the document text.
-              </p>
-              {props.highlights.length > 0 ? (
-                <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
-                  {props.highlights.map((highlight, highlightIndex) => (
-                    <li key={highlight.id} className="bookmark-list-item highlight-list-item">
-                      <div
-                        className={
-                          highlight.id === activeHighlightId ? "bookmark-button highlight-card highlight-card-active" : "bookmark-button highlight-card"
-                        }
-                      >
+                <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                  {bookmarkMessage}
+                </p>
+                {currentParagraphPreview ? (
+                  <p className="hint">Current paragraph preview: {currentParagraphPreview}</p>
+                ) : null}
+                <label className="field bookmark-note-field" htmlFor={bookmarkNoteInputId}>
+                  <span>Short note for this bookmarked paragraph</span>
+                  <input
+                    ref={bookmarkNoteInputRef}
+                    id={bookmarkNoteInputId}
+                    name="bookmarkNote"
+                    type="text"
+                    value={bookmarkNoteInputValue}
+                    onChange={(event) => setBookmarkNoteInputValue(event.target.value)}
+                    maxLength={MAX_BOOKMARK_NOTE_LENGTH}
+                    placeholder="Optional study note"
+                    disabled={!hasText || !props.documentState.filePath}
+                    aria-describedby={bookmarkNoteHintId}
+                  />
+                </label>
+                <p id={bookmarkNoteHintId} className="hint">
+                  {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note. Press `Escape`
+                  to return to the document text.
+                </p>
+                {props.bookmarks.length > 0 ? (
+                  <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
+                    {props.bookmarks.map((bookmark, bookmarkIndex) => (
+                      <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
                         <button
                           ref={(element) => {
-                            highlightOpenButtonRefs.current[highlightIndex] = element;
+                            bookmarkButtonRefs.current[bookmarkIndex] = element;
                           }}
                           type="button"
-                          className="highlight-card-open"
-                          onClick={() => handleJumpToHighlight(highlight, highlightIndex)}
-                          aria-controls={`reader-paragraph-${highlight.paragraphIndex}`}
+                          className="bookmark-button"
+                          onClick={() => handleJumpToBookmark(bookmark, bookmarkIndex)}
+                          aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
                         >
-                          <span className="bookmark-button-title">Paragraph {highlight.paragraphIndex + 1}</span>
-                          <span className="bookmark-button-preview">{highlight.previewText}</span>
-                          {highlight.note ? <span className="bookmark-button-note">Note: {highlight.note}</span> : null}
+                          <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
+                          <span className="bookmark-button-preview">{bookmark.previewText}</span>
+                          {bookmark.note ? <span className="bookmark-button-note">Note: {bookmark.note}</span> : null}
                         </button>
-                        <button
-                          type="button"
-                          className="secondary-button highlight-card-remove"
-                          onClick={() => {
-                            setActiveHighlightId(highlight.id);
-                            setHighlightNoteInputValue(highlight.note);
-                            props.onRemoveHighlight(highlight.id);
-                            setActiveHighlightId(null);
-                            setSelectedTextRange(null);
-                            clearBrowserSelection();
-                            setHighlightMessage(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
-                            props.onAnnounce(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="hint">Highlights will appear here after you select text and save one.</p>
-              )}
-            </section>
-
-            <section
-              ref={bookmarkSectionRef}
-              className="reader-bookmarks"
-              aria-labelledby="reader-bookmarks-title"
-              tabIndex={-1}
-            >
-              <div className="reader-bookmarks-header">
-                <div>
-                  <p className="reader-toolbar-label">Bookmarks</p>
-                  <h3 id="reader-bookmarks-title">Saved markers for this document</h3>
-                </div>
-                <button type="button" onClick={handleAddBookmark} disabled={!hasText || !props.documentState.filePath}>
-                  {bookmarkActionLabel}
-                </button>
-              </div>
-              <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-                {bookmarkMessage}
-              </p>
-              {currentParagraphPreview ? (
-                <p className="hint">Current paragraph preview: {currentParagraphPreview}</p>
-              ) : null}
-              <label className="field bookmark-note-field" htmlFor={bookmarkNoteInputId}>
-                <span>Short note for this bookmarked paragraph</span>
-                <input
-                  ref={bookmarkNoteInputRef}
-                  id={bookmarkNoteInputId}
-                  type="text"
-                  value={bookmarkNoteInputValue}
-                  onChange={(event) => setBookmarkNoteInputValue(event.target.value)}
-                  maxLength={MAX_BOOKMARK_NOTE_LENGTH}
-                  placeholder="Optional study note"
-                  disabled={!hasText || !props.documentState.filePath}
-                  aria-describedby={bookmarkNoteHintId}
-                />
-              </label>
-              <p id={bookmarkNoteHintId} className="hint">
-                {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note. Press `Escape`
-                here to return to the document text.
-              </p>
-              {props.bookmarks.length > 0 ? (
-                <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
-                  {props.bookmarks.map((bookmark, bookmarkIndex) => (
-                    <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
-                      <button
-                        ref={(element) => {
-                          bookmarkButtonRefs.current[bookmarkIndex] = element;
-                        }}
-                        type="button"
-                        className="bookmark-button"
-                        onClick={() => handleJumpToBookmark(bookmark, bookmarkIndex)}
-                        aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
-                      >
-                        <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
-                        <span className="bookmark-button-preview">{bookmark.previewText}</span>
-                        {bookmark.note ? <span className="bookmark-button-note">Note: {bookmark.note}</span> : null}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="hint">Bookmarks will appear here after you save one from the current paragraph.</p>
-              )}
-            </section>
-          </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="hint">Bookmarks will appear here after you save one from the current paragraph.</p>
+                )}
+              </section>
+            </div>
+          </section>
         </div>
       </div>
 
