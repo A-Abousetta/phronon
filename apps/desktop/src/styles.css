@@ -70,6 +70,18 @@ select {
   font: inherit;
 }
 
+select {
+  background-color: #14211f;
+  color: #f0fffb;
+  color-scheme: dark;
+}
+
+option,
+optgroup {
+  background-color: #14211f;
+  color: #f0fffb;
+}
+
 button,
 select,
 input {
@@ -1509,6 +1521,13 @@ select:disabled {
   font-size: 0.93rem;
 }
 
+.settings-banner h2,
+.settings-region-header h3,
+.settings-subsection-header h4,
+.settings-diagnostics-group-header h4 {
+  text-wrap: balance;
+}
+
 .settings-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.42fr) minmax(18rem, 0.86fr);
@@ -1524,8 +1543,7 @@ select:disabled {
 }
 
 .settings-support-column {
-  position: sticky;
-  top: calc(5.35rem + var(--content-gutter));
+  position: static;
 }
 
 .settings-region {
@@ -1584,6 +1602,23 @@ select:disabled {
 .settings-form-grid {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   gap: 0.82rem;
+}
+
+.settings-static-field {
+  align-content: start;
+}
+
+.settings-static-value {
+  display: flex;
+  align-items: center;
+  min-height: 3rem;
+  margin: 0;
+  padding: 0.78rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(28, 42, 39, 0.96), rgba(20, 31, 29, 0.98));
+  color: #f0fffb;
+  box-shadow: var(--shadow-inset);
 }
 
 .settings-voice-layout,
@@ -1668,6 +1703,7 @@ select:disabled {
 .settings-diagnostics-summary-value {
   font-size: 1.34rem;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
   color: #f0fffb;
 }
 
