@@ -537,62 +537,76 @@ function HomeScreen(props: {
   const importButtonLabel = isFilePickerLoading ? "Choosing study file" : "Import study file";
 
   return (
-    <section className="page-workspace" aria-labelledby={homeTitleId}>
-      <div className="page-banner">
-        <div>
-          <p className="page-banner-label">Home</p>
-          <h2 id={homeTitleId}>Start studying without extra clutter</h2>
-          <p className="page-banner-text">
-            Keep import and recent material close at hand in a simple, keyboard-first workspace.
-          </p>
-        </div>
-        <button
-          className="primary-button"
-          type="button"
-          onClick={() => void props.onImportFile()}
-          disabled={isFilePickerLoading}
-          aria-label={importButtonLabel}
-          aria-describedby={homeImportStatusId}
-        >
-          {isFilePickerLoading ? "Choosing document..." : "Import File"}
-        </button>
-      </div>
-
-      <div className="page-columns">
-        <section className="panel-section" aria-labelledby={homeImportTitleId}>
-          <div className="panel-section-header">
-            <p className="panel-kicker">Quick start</p>
-            <h3 id={homeImportTitleId}>Import study material</h3>
-            <p>Bring in a file and move into reading with as few steps as possible.</p>
-          </div>
-          <div className="stack">
-            <p
-              id={homeImportStatusId}
-              className={props.documentState.error ? "status-message error-text compact-status" : "status-message compact-status"}
-              role={props.documentState.error ? "alert" : "status"}
-              aria-live={props.documentState.error ? "assertive" : "polite"}
-              aria-atomic="true"
-            >
-              {props.documentState.isLoading && props.activeLoad
-                ? props.activeLoad.statusMessage
-                : props.documentState.error
-                ? props.documentState.error
-                : props.documentState.filePath
-                  ? `Current document: ${getDocumentFileName(props.documentState.filePath)}.`
-                  : "No document is loaded yet."}
+    <section className="page-workspace home-workspace" aria-labelledby={homeTitleId}>
+      <div className="home-layout">
+        <section className="home-launchpad" aria-labelledby={homeTitleId}>
+          <div className="home-launchpad-copy">
+            <p className="page-banner-label">Home</p>
+            <h2 id={homeTitleId}>Start reading with one clear next step</h2>
+            <p className="page-banner-text">
+              Import a study file, keep your latest material close, and move into Reader without a dashboard detour.
             </p>
-            <p className="hint">Planned support: TXT, PDF, and image files.</p>
+          </div>
+
+          <div className="home-launchpad-actions">
+            <div className="home-primary-action">
+              <div className="home-primary-action-copy">
+                <p className="panel-kicker">Primary action</p>
+                <h3 id={homeImportTitleId}>Import study material</h3>
+                <p>Open a TXT or PDF file and continue directly into the Reader workspace.</p>
+              </div>
+              <button
+                className="primary-button home-import-button"
+                type="button"
+                onClick={() => void props.onImportFile()}
+                disabled={isFilePickerLoading}
+                aria-label={importButtonLabel}
+                aria-describedby={homeImportStatusId}
+              >
+                {isFilePickerLoading ? "Choosing document..." : "Import File"}
+              </button>
+            </div>
+
+            <div className="home-supporting-grid">
+              <div className="home-status-card">
+                <p className="panel-kicker">Current session</p>
+                <p
+                  id={homeImportStatusId}
+                  className={props.documentState.error ? "status-message error-text compact-status" : "status-message compact-status"}
+                  role={props.documentState.error ? "alert" : "status"}
+                  aria-live={props.documentState.error ? "assertive" : "polite"}
+                  aria-atomic="true"
+                >
+                  {props.documentState.isLoading && props.activeLoad
+                    ? props.activeLoad.statusMessage
+                    : props.documentState.error
+                    ? props.documentState.error
+                    : props.documentState.filePath
+                      ? `Current document: ${getDocumentFileName(props.documentState.filePath)}.`
+                      : "No document is loaded yet."}
+                </p>
+              </div>
+
+              <div className="home-flow-card" aria-label="Study flow summary">
+                <p className="panel-kicker">Reading flow</p>
+                <ul className="simple-list home-flow-list">
+                  <li>Import one study file and move straight into Reader.</li>
+                  <li>Use recent material to reopen where you left off.</li>
+                  <li>Keep playback, search, bookmarks, and highlights inside Reader.</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section className="panel-section" aria-labelledby={homeRecentTitleId} aria-describedby={homeRecentHintId}>
-          <div className="panel-section-header">
+        <section className="home-recents panel-section" aria-labelledby={homeRecentTitleId} aria-describedby={homeRecentHintId}>
+          <div className="panel-section-header home-recents-header">
             <p className="panel-kicker">Recent</p>
-            <h3 id={homeRecentTitleId}>Continue where you left off</h3>
-            <p id={homeRecentHintId}>Recent study material stays visible without taking over the screen.</p>
+            <h3 id={homeRecentTitleId}>Recent study material</h3>
+            <p id={homeRecentHintId}>Pick up quickly from the latest file instead of re-importing it.</p>
           </div>
           {props.recentDocuments.length > 0 ? (
-            <ul className="simple-list" aria-label="Recent documents">
+            <ul className="simple-list home-recent-list" aria-label="Recent documents">
               {props.recentDocuments.map((document) => {
                 const safeFileName = document.fileName.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
                 const metaId = `recent-document-meta-${document.lastOpenedAt}-${safeFileName}`;
@@ -616,7 +630,7 @@ function HomeScreen(props: {
               })}
             </ul>
           ) : (
-            <p className="hint">No recent documents yet. Import a TXT or PDF file to see it here.</p>
+            <p className="hint">No recent documents yet. Import a TXT or PDF file to build your recent study list.</p>
           )}
         </section>
       </div>
