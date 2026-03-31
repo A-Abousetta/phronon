@@ -1,10 +1,10 @@
 export const brandColors = {
-  primary: "#45776a",
-  primaryDark: "#38554e",
-  accent: "#83b9af",
-  background: "#1f2b28",
-  surface: "#150c10",
-  textPrimary: "#afded6"
+  primary: "#5fa392",
+  primaryDark: "#8fd4c2",
+  accent: "#c7f4e8",
+  background: "#0d1413",
+  surface: "#121c1a",
+  textPrimary: "#e9fff9"
 } as const;
 
 export const themeColorVariables = {
