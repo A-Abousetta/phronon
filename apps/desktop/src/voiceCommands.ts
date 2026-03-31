@@ -14,6 +14,11 @@ export type VoiceRecognitionAvailability = {
   message: string;
 };
 
+export const VOICE_COMMAND_DETECTED_MESSAGE =
+  "Experimental voice commands can be tried on this device because browser speech recognition was detected. Phronon will only treat them as working after listening stays active long enough to use.";
+export const VOICE_COMMAND_UNAVAILABLE_MESSAGE =
+  "Experimental voice commands are unavailable on this device. Reader voice commands need browser speech recognition support.";
+
 export type BrowserSpeechRecognitionAlternative = {
   transcript: string;
   confidence: number;
@@ -43,9 +48,13 @@ export type BrowserSpeechRecognition = EventTarget & {
   interimResults: boolean;
   lang: string;
   maxAlternatives: number;
+  onaudiostart: ((event: Event) => void) | null;
   onend: ((event: Event) => void) | null;
+  onnomatch: ((event: Event) => void) | null;
   onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
   onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onspeechstart: ((event: Event) => void) | null;
+  onstart: ((event: Event) => void) | null;
   start(): void;
   stop(): void;
   abort(): void;
@@ -97,14 +106,12 @@ export function getVoiceRecognitionAvailability(windowObject: Window): VoiceReco
   if (getVoiceRecognitionConstructor(windowObject)) {
     return {
       available: true,
-      message:
-        "Voice command mode is available on this device. It listens only after you press the listen button."
+      message: VOICE_COMMAND_DETECTED_MESSAGE
     };
   }
 
   return {
     available: false,
-    message:
-      "Voice command mode is unavailable on this device. Reader voice commands need browser speech recognition support."
+    message: VOICE_COMMAND_UNAVAILABLE_MESSAGE
   };
 }
