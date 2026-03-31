@@ -2529,255 +2529,390 @@ function SettingsScreen(props: {
   });
   const manualVoiceUnavailableMessage =
     props.speechVoicePreference === "manual" && !preferredVoice ? fallbackVoice.warning : null;
+  const diagnosticsReadyItems = runtimeDiagnostics.filter((item) => item.statusLabel === "Works immediately");
+  const diagnosticsSetupItems = runtimeDiagnostics.filter((item) => item.statusLabel === "Optional extra setup");
+  const diagnosticsUnavailableItems = runtimeDiagnostics.filter((item) => item.statusLabel === "Unavailable on this device");
+  const diagnosticsCheckingItems = runtimeDiagnostics.filter((item) => item.statusLabel === "Checking");
+  const diagnosticsSummaryItems = [
+    { label: "Ready now", value: diagnosticsReadyItems.length },
+    { label: "Optional setup", value: diagnosticsSetupItems.length },
+    { label: "Unavailable", value: diagnosticsUnavailableItems.length },
+    { label: "Checking", value: diagnosticsCheckingItems.length }
+  ].filter((item) => item.value > 0);
+  const diagnosticsSections = [
+    {
+      id: "ready",
+      title: "Ready now",
+      description: "These parts are already available on this device.",
+      items: diagnosticsReadyItems
+    },
+    {
+      id: "setup",
+      title: "Needs optional setup",
+      description: "These features need extra local setup before Phronon can use them.",
+      items: diagnosticsSetupItems
+    },
+    {
+      id: "unavailable",
+      title: "Unavailable on this device",
+      description: "Phronon will keep safe fallbacks until the device reports support here.",
+      items: diagnosticsUnavailableItems
+    },
+    {
+      id: "checking",
+      title: "Still checking",
+      description: "Phronon is still confirming these capabilities.",
+      items: diagnosticsCheckingItems
+    }
+  ].filter((section) => section.items.length > 0);
+  const settingsShortcutGroups = [
+    ...groupedAppShortcuts.map((group) => ({
+      ...group,
+      settingsLabel: "App-wide"
+    })),
+    ...groupedReaderShortcuts.map((group) => ({
+      ...group,
+      settingsLabel: group.groupLabel === "Reading" ? "Reading flow" : "Search, bookmarks, and highlights"
+    }))
+  ];
+  const settingsOverviewItems = [
+    {
+      title: "Reading comfort",
+      description: "App defaults, text size, and contrast now live together so the basics are quick to review."
+    },
+    {
+      title: "Voice choices",
+      description:
+        props.speechVoicePreference === "manual"
+          ? "Manual voice mode stays visible with clear fallback guidance."
+          : "Automatic voice behavior stays close to manual voice setup when you need more control."
+    },
+    {
+      title: "Setup status",
+      description:
+        diagnosticsReadyItems.length === runtimeDiagnostics.length
+          ? "Everything needed for core reading is ready on this device."
+          : `${diagnosticsReadyItems.length} of ${runtimeDiagnostics.length} checks are ready now.`
+    }
+  ];
 
   return (
-    <section className="page-workspace" aria-labelledby={settingsTitleId}>
-      <div className="page-banner">
-        <div>
+    <section className="page-workspace settings-workspace" aria-labelledby={settingsTitleId}>
+      <div className="page-banner settings-banner">
+        <div className="settings-banner-copy">
           <p className="page-banner-label">Settings</p>
           <h2 id={settingsTitleId}>Simple preferences, easy to review</h2>
           <p className="page-banner-text">
-            Keep default choices clear and accessible without adding extra noise.
+            Review everyday preferences, voice choices, and setup guidance in one calm place without turning the page
+            into a dense control dump.
           </p>
         </div>
+        <ul className="plain-list settings-banner-outline" aria-label="Settings overview">
+          {settingsOverviewItems.map((item) => (
+            <li key={item.title} className="settings-banner-outline-item">
+              <p className="settings-banner-outline-title">{item.title}</p>
+              <p className="settings-banner-outline-text">{item.description}</p>
+            </li>
+          ))}
+        </ul>
       </div>
 
-      <div className="page-columns">
-        <section className="panel-section" aria-labelledby="settings-interface-title" aria-describedby={voiceSummaryId}>
-          <div className="panel-section-header">
-            <p className="panel-kicker">Preferences</p>
-            <h3 id="settings-interface-title">Interface settings</h3>
-            <p>Small display adjustments keep the layout calm while making text easier to read.</p>
-          </div>
-          <div className="form-grid" role="group" aria-label="Interface preferences">
-            <label className="field" htmlFor={languageId}>
-              <span>Interface language</span>
-              <select id={languageId} defaultValue="en" aria-describedby={voiceSummaryId}>
-                <option value="en">English</option>
-                <option value="ar">Arabic</option>
-              </select>
-            </label>
+      <div className="settings-layout">
+        <div className="settings-main-column">
+          <section className="panel-section settings-region" aria-labelledby="settings-interface-title">
+            <div className="panel-section-header settings-region-header">
+              <p className="panel-kicker">Everyday setup</p>
+              <h3 id="settings-interface-title">Reading comfort and defaults</h3>
+              <p>Keep the basics together so a first pass through Settings answers what the app looks like and how it starts.</p>
+            </div>
 
-            <label className="field" htmlFor={startupId}>
-              <span>Open on startup</span>
-              <select id={startupId} defaultValue="home">
-                <option value="home">Home</option>
-                <option value="reader">Reader</option>
-                <option value="settings">Settings</option>
-              </select>
-            </label>
+            <div className="settings-subsection-grid">
+              <section className="settings-subsection" aria-labelledby="settings-defaults-title">
+                <div className="settings-subsection-header">
+                  <h4 id="settings-defaults-title">App defaults</h4>
+                  <p>Choose the language and starting screen you want Phronon to return to.</p>
+                </div>
+                <div className="form-grid settings-form-grid" role="group" aria-label="App defaults">
+                  <label className="field" htmlFor={languageId}>
+                    <span>Interface language</span>
+                    <select id={languageId} defaultValue="en">
+                      <option value="en">English</option>
+                      <option value="ar">Arabic</option>
+                    </select>
+                  </label>
 
-            <label className="field" htmlFor={interfaceTextScaleId}>
-              <span>App text size</span>
-              <select
-                id={interfaceTextScaleId}
-                value={props.interfaceTextScale}
-                onChange={(event) => props.onInterfaceTextScaleChange(parseInterfaceTextScale(event.target.value))}
-                aria-describedby={displayHintId}
-              >
-                <option value="default">Standard</option>
-                <option value="large">Large</option>
-                <option value="largest">Largest</option>
-              </select>
-            </label>
+                  <label className="field" htmlFor={startupId}>
+                    <span>Open on startup</span>
+                    <select id={startupId} defaultValue="home">
+                      <option value="home">Home</option>
+                      <option value="reader">Reader</option>
+                      <option value="settings">Settings</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
 
-            <label className="field" htmlFor={readerTextScaleId}>
-              <span>Reader text size</span>
-              <select
-                id={readerTextScaleId}
-                value={props.readerTextScale}
-                onChange={(event) => props.onReaderTextScaleChange(parseReaderTextScale(event.target.value))}
-                aria-describedby={displayHintId}
-              >
-                <option value="default">Standard</option>
-                <option value="large">Large</option>
-                <option value="largest">Largest</option>
-              </select>
-            </label>
+              <section className="settings-subsection" aria-labelledby="settings-display-title">
+                <div className="settings-subsection-header">
+                  <h4 id="settings-display-title">Display</h4>
+                  <p>Adjust the overall scale and contrast without changing how navigation or playback works.</p>
+                </div>
+                <div className="form-grid settings-form-grid" role="group" aria-label="Display preferences">
+                  <label className="field" htmlFor={interfaceTextScaleId}>
+                    <span>App text size</span>
+                    <select
+                      id={interfaceTextScaleId}
+                      value={props.interfaceTextScale}
+                      onChange={(event) => props.onInterfaceTextScaleChange(parseInterfaceTextScale(event.target.value))}
+                      aria-describedby={displayHintId}
+                    >
+                      <option value="default">Standard</option>
+                      <option value="large">Large</option>
+                      <option value="largest">Largest</option>
+                    </select>
+                  </label>
 
-            <label className="field" htmlFor={contrastModeId}>
-              <span>Contrast</span>
-              <select
-                id={contrastModeId}
-                value={props.contrastMode}
-                onChange={(event) => props.onContrastModeChange(parseContrastMode(event.target.value))}
-                aria-describedby={displayHintId}
-              >
-                <option value="default">Calm contrast</option>
-                <option value="strong">Stronger contrast</option>
-              </select>
-            </label>
+                  <label className="field" htmlFor={readerTextScaleId}>
+                    <span>Reader text size</span>
+                    <select
+                      id={readerTextScaleId}
+                      value={props.readerTextScale}
+                      onChange={(event) => props.onReaderTextScaleChange(parseReaderTextScale(event.target.value))}
+                      aria-describedby={displayHintId}
+                    >
+                      <option value="default">Standard</option>
+                      <option value="large">Large</option>
+                      <option value="largest">Largest</option>
+                    </select>
+                  </label>
 
-            <label className="field" htmlFor={speechVoiceModeId}>
-              <span>Speech voice mode</span>
-              <select
-                id={speechVoiceModeId}
-                value={props.speechVoicePreference}
-                onChange={(event) =>
-                  props.onSpeechVoicePreferenceChange(
-                    event.target.value === "default"
-                      ? "default"
-                      : event.target.value === "manual"
-                        ? "manual"
-                        : "automatic"
-                  )
-                }
+                  <label className="field" htmlFor={contrastModeId}>
+                    <span>Contrast</span>
+                    <select
+                      id={contrastModeId}
+                      value={props.contrastMode}
+                      onChange={(event) => props.onContrastModeChange(parseContrastMode(event.target.value))}
+                      aria-describedby={displayHintId}
+                    >
+                      <option value="default">Calm contrast</option>
+                      <option value="strong">Stronger contrast</option>
+                    </select>
+                  </label>
+                </div>
+                <p id={displayHintId} className="hint">
+                  These display changes only adjust size and contrast. Keyboard shortcuts, focus order, playback, and
+                  screen-reader labels stay the same.
+                </p>
+              </section>
+
+              <section
+                className="settings-subsection settings-subsection-emphasis"
+                aria-labelledby="settings-speech-mode-title"
                 aria-describedby={`${voiceSummaryId} ${voiceModeHintId}`}
               >
-                <option value="automatic">Automatic</option>
-                <option value="default">Always use default voice</option>
-                <option value="manual">Use selected voice</option>
-              </select>
-            </label>
-          </div>
-          <p id={displayHintId} className="hint">
-            These display changes only adjust size and contrast. Keyboard shortcuts, focus order, playback, and screen-reader labels stay the same.
-          </p>
-          <p id={voiceSummaryId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-            {voiceSummary}
-          </p>
-          <p id={voiceModeHintId} className="hint">
-            Automatic mode prefers an Arabic-capable voice for Arabic script and keeps the default voice for other text.
-          </p>
-        </section>
+                <div className="settings-subsection-header">
+                  <h4 id="settings-speech-mode-title">Speech behavior</h4>
+                  <p>Set how Phronon chooses a playback voice before you pick a specific manual voice below.</p>
+                </div>
+                <div className="form-grid settings-form-grid" role="group" aria-label="Speech behavior">
+                  <label className="field" htmlFor={speechVoiceModeId}>
+                    <span>Speech voice mode</span>
+                    <select
+                      id={speechVoiceModeId}
+                      value={props.speechVoicePreference}
+                      onChange={(event) =>
+                        props.onSpeechVoicePreferenceChange(
+                          event.target.value === "default"
+                            ? "default"
+                            : event.target.value === "manual"
+                              ? "manual"
+                              : "automatic"
+                        )
+                      }
+                      aria-describedby={`${voiceSummaryId} ${voiceModeHintId}`}
+                    >
+                      <option value="automatic">Automatic</option>
+                      <option value="default">Always use default voice</option>
+                      <option value="manual">Use selected voice</option>
+                    </select>
+                  </label>
+                </div>
+                <p id={voiceSummaryId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                  {voiceSummary}
+                </p>
+                <p id={voiceModeHintId} className="hint">
+                  Automatic mode prefers an Arabic-capable voice for Arabic script and keeps the default voice for other text.
+                </p>
+              </section>
+            </div>
+          </section>
 
-        <section className="panel-section" aria-labelledby="settings-readiness-title">
-          <div className="panel-section-header">
-            <p className="panel-kicker">Readiness</p>
-            <h3 id="settings-readiness-title">Setup diagnostics</h3>
-            <p>Review what works now, what needs optional setup, and what is not available on this device yet.</p>
-          </div>
-          <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-            {props.runtimeSupportStatus?.message ?? "Checking what is ready on this device."}
-          </p>
-          <ul className="simple-list voice-diagnostics-list" aria-label="Runtime readiness diagnostics">
-            {runtimeDiagnostics.map((item) => (
-              <li key={item.id} className="voice-diagnostics-item">
-                <span className="voice-diagnostics-name">
-                  {item.label}: {item.statusLabel}
-                </span>
-                <span className="voice-diagnostics-meta">{item.detail}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+          <section className="panel-section settings-region" aria-labelledby="settings-voice-picker-title" aria-describedby={voiceSummaryId}>
+            <div className="panel-section-header settings-region-header">
+              <p className="panel-kicker">Playback voice</p>
+              <h3 id="settings-voice-picker-title">Voice choice and fallback</h3>
+              <p>Manual voice selection stays separate from everyday display controls, while fallback behavior remains easy to understand.</p>
+            </div>
 
-        <section className="panel-section" aria-labelledby="settings-voice-picker-title" aria-describedby={voiceSummaryId}>
-          <div className="panel-section-header">
-            <p className="panel-kicker">Voices</p>
-            <h3 id="settings-voice-picker-title">Voice diagnostics and picker</h3>
-            <p>Review detected voices, choose a manual playback voice if needed, and keep fallback behavior clear.</p>
-          </div>
-          <div className="form-grid" role="group" aria-label="Speech voice controls">
-            <label className="field" htmlFor={speechVoiceId}>
-              <span>Preferred playback voice</span>
-              <select
-                id={speechVoiceId}
-                value={props.preferredVoiceId ?? ""}
-                onChange={(event) =>
-                  props.onPreferredVoiceIdChange(event.target.value.trim() ? event.target.value : null)
-                }
-                disabled={props.availableVoices.length === 0}
-                aria-describedby={`${voicePickerHintId} ${voiceFallbackId}`}
-              >
-                <option value="">System default voice</option>
-                {props.availableVoices.map((voice) => (
-                  <option key={getVoiceIdentifier(voice)} value={getVoiceIdentifier(voice)}>
-                    {getVoiceDisplayName(voice)}
-                  </option>
+            <div className="settings-voice-layout">
+              <div className="settings-voice-primary">
+                <label className="field" htmlFor={speechVoiceId}>
+                  <span>Preferred playback voice</span>
+                  <select
+                    id={speechVoiceId}
+                    value={props.preferredVoiceId ?? ""}
+                    onChange={(event) =>
+                      props.onPreferredVoiceIdChange(event.target.value.trim() ? event.target.value : null)
+                    }
+                    disabled={props.availableVoices.length === 0}
+                    aria-describedby={`${voicePickerHintId} ${voiceFallbackId} ${voiceListId}`}
+                  >
+                    <option value="">System default voice</option>
+                    {props.availableVoices.map((voice) => (
+                      <option key={getVoiceIdentifier(voice)} value={getVoiceIdentifier(voice)}>
+                        {getVoiceDisplayName(voice)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <p id={voicePickerHintId} className="hint">
+                  Voice name and language come from the device. If metadata is incomplete, Phronon falls back to the safest
+                  available label.
+                </p>
+                <p id={voiceListId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                  {preferredVoice
+                    ? `Selected voice: ${getVoiceDisplayName(preferredVoice)}.`
+                    : "Selected voice: system default."}
+                </p>
+                {manualVoiceUnavailableMessage ? (
+                  <p
+                    id={voiceFallbackId}
+                    className="status-message error-text compact-status"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                  >
+                    {manualVoiceUnavailableMessage}
+                  </p>
+                ) : (
+                  <p id={voiceFallbackId} className="hint">
+                    {props.speechVoicePreference === "manual"
+                      ? "Manual mode uses the selected voice for all playback."
+                      : hasArabicVoice
+                        ? "Automatic mode can switch between Arabic and non-Arabic voices when text changes."
+                        : "Automatic mode stays available even if this device does not report an Arabic voice."}
+                  </p>
+                )}
+              </div>
+
+              <section className="settings-subsection settings-voice-library" aria-labelledby="settings-detected-voices-title">
+                <div className="settings-subsection-header">
+                  <h4 id="settings-detected-voices-title">Detected voices</h4>
+                  <p>Keep the device voice list nearby when you want to confirm what Phronon can choose from.</p>
+                </div>
+                {props.availableVoices.length > 0 ? (
+                  <ul className="simple-list settings-voice-list" aria-label="Detected speech voices">
+                    {props.availableVoices.map((voice) => (
+                      <li key={getVoiceIdentifier(voice)} className="settings-voice-item">
+                        <span className="settings-voice-name">{getVoiceDisplayName(voice)}</span>
+                        <span className="settings-voice-meta">{voice.default ? "System default" : "Available voice"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="hint settings-empty-copy">No system voices were reported yet.</p>
+                )}
+              </section>
+            </div>
+          </section>
+
+          <section className="panel-section settings-region settings-help-region" aria-labelledby="settings-shortcuts-title">
+            <div className="panel-section-header settings-region-header">
+              <p className="panel-kicker">Guidance</p>
+              <h3 id="settings-shortcuts-title">Shortcut help and accessibility promises</h3>
+              <p>The keyboard map stays visible in one place, with the product&apos;s accessibility promises beside it instead of in a separate heavy panel.</p>
+            </div>
+
+            <div className="settings-help-layout">
+              <div className="settings-shortcuts-grid">
+                {settingsShortcutGroups.map((shortcutGroup) => (
+                  <section key={shortcutGroup.settingsLabel} className="settings-shortcut-group">
+                    <p className="settings-shortcut-group-label">{shortcutGroup.settingsLabel}</p>
+                    <ul className="simple-list" aria-label={`${shortcutGroup.settingsLabel} shortcuts`}>
+                      {shortcutGroup.shortcuts.map((shortcut) => (
+                        <li key={shortcut.action}>
+                          <strong>{shortcut.keys}</strong>: {shortcut.description}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </select>
-            </label>
-          </div>
-          <p id={voicePickerHintId} className="hint">
-            Voice name and language come from the device. If metadata is incomplete, Phronon falls back to the safest available label.
-          </p>
-          <p id={voiceListId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-            {preferredVoice
-              ? `Selected voice: ${getVoiceDisplayName(preferredVoice)}.`
-              : "Selected voice: system default."}
-          </p>
-          {manualVoiceUnavailableMessage ? (
-            <p
-              id={voiceFallbackId}
-              className="status-message error-text compact-status"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {manualVoiceUnavailableMessage}
-            </p>
-          ) : (
-            <p id={voiceFallbackId} className="hint">
-              {props.speechVoicePreference === "manual"
-                ? "Manual mode uses the selected voice for all playback."
-                : hasArabicVoice
-                  ? "Automatic mode can switch between Arabic and non-Arabic voices when text changes."
-                  : "Automatic mode stays available even if this device does not report an Arabic voice."}
-            </p>
-          )}
-          {props.availableVoices.length > 0 ? (
-            <ul className="simple-list voice-diagnostics-list" aria-label="Detected speech voices">
-              {props.availableVoices.map((voice) => (
-                <li key={getVoiceIdentifier(voice)} className="voice-diagnostics-item">
-                  <span className="voice-diagnostics-name">{getVoiceDisplayName(voice)}</span>
-                  <span className="voice-diagnostics-meta">
-                    {voice.default ? "System default" : "Available voice"}
-                  </span>
-                </li>
+              </div>
+
+              <aside className="settings-help-aside" aria-labelledby="settings-accessibility-title">
+                <div className="settings-subsection-header">
+                  <h4 id="settings-accessibility-title">Predictable by design</h4>
+                  <p>These core promises keep Settings and Reader calm for keyboard and screen-reader users.</p>
+                </div>
+                <ul className="simple-list settings-accessibility-list">
+                  <li>Keyboard navigation is available for every main action.</li>
+                  <li>Focus order stays predictable when screens or document states change.</li>
+                  <li>Status messages and controls keep explicit accessible names.</li>
+                </ul>
+                <p className="hint">
+                  Reader shortcuts stay inactive while you are typing in search, bookmark notes, highlight notes, sliders,
+                  or other form controls. `Escape` is the one exception and returns focus to the document text.
+                </p>
+              </aside>
+            </div>
+          </section>
+        </div>
+
+        <aside className="settings-support-column">
+          <section className="panel-section settings-region settings-diagnostics-region" aria-labelledby="settings-readiness-title">
+            <div className="panel-section-header settings-region-header">
+              <p className="panel-kicker">Readiness</p>
+              <h3 id="settings-readiness-title">Setup diagnostics</h3>
+              <p>Check what is ready today, what needs extra local setup, and what this device still does not report.</p>
+            </div>
+
+            <div className="settings-diagnostics-summary" aria-label="Diagnostics summary">
+              {diagnosticsSummaryItems.map((item) => (
+                <div key={item.label} className="settings-diagnostics-summary-card">
+                  <span className="settings-diagnostics-summary-value">{item.value}</span>
+                  <span className="settings-diagnostics-summary-label">{item.label}</span>
+                </div>
               ))}
-            </ul>
-          ) : null}
-        </section>
-
-        <section className="panel-section" aria-labelledby="settings-shortcuts-title">
-          <div className="panel-section-header">
-            <p className="panel-kicker">Keyboard</p>
-            <h3 id="settings-shortcuts-title">Shortcut reference</h3>
-            <p>The Reader uses one small command map so file opening, reading, search, and saved markers stay easy to remember.</p>
-          </div>
-          {groupedAppShortcuts.map((shortcutGroup) => (
-            <div key={shortcutGroup.groupLabel} className="settings-shortcut-group">
-              <p className="settings-shortcut-group-label">{shortcutGroup.groupLabel}</p>
-              <ul className="simple-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
-                {shortcutGroup.shortcuts.map((shortcut) => (
-                  <li key={shortcut.action}>
-                    <strong>{shortcut.keys}</strong>: {shortcut.description}
-                  </li>
-                ))}
-              </ul>
             </div>
-          ))}
-          {groupedReaderShortcuts.map((shortcutGroup) => (
-            <div key={shortcutGroup.groupLabel} className="settings-shortcut-group">
-              <p className="settings-shortcut-group-label">{shortcutGroup.groupLabel}</p>
-              <ul className="simple-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
-                {shortcutGroup.shortcuts.map((shortcut) => (
-                  <li key={shortcut.action}>
-                    <strong>{shortcut.keys}</strong>: {shortcut.description}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          <p className="hint">
-            Reader shortcuts stay inactive while you are typing in search, bookmark notes, highlight notes, sliders, or
-            other form controls. `Escape` is the one exception and returns focus to the document text.
-          </p>
-        </section>
 
-        <section className="panel-section" aria-labelledby="settings-accessibility-title">
-          <div className="panel-section-header">
-            <p className="panel-kicker">Accessibility</p>
-            <h3 id="settings-accessibility-title">Accessibility notes</h3>
-            <p>Core promises for the first version stay visible and easy to scan.</p>
-          </div>
-          <ul className="simple-list">
-            <li>Keyboard navigation is available for every main action.</li>
-            <li>Focus order stays predictable when screens or document states change.</li>
-            <li>Status messages and controls keep explicit accessible names.</li>
-          </ul>
-        </section>
+            <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+              {props.runtimeSupportStatus?.message ?? "Checking what is ready on this device."}
+            </p>
+
+            <div className="settings-diagnostics-groups">
+              {diagnosticsSections.map((section) => (
+                <section key={section.id} className="settings-diagnostics-group" aria-labelledby={`settings-diagnostics-group-${section.id}`}>
+                  <div className="settings-diagnostics-group-header">
+                    <h4 id={`settings-diagnostics-group-${section.id}`}>{section.title}</h4>
+                    <p>{section.description}</p>
+                  </div>
+                  <ul className="simple-list settings-diagnostics-list" aria-label={`${section.title} diagnostics`}>
+                    {section.items.map((item) => (
+                      <li key={item.id} className="settings-diagnostics-item">
+                        <div className="settings-diagnostics-item-top">
+                          <span className={`settings-status-pill settings-status-pill-${section.id}`}>{item.statusLabel}</span>
+                          <span className="settings-diagnostics-name">{item.label}</span>
+                        </div>
+                        <p className="settings-diagnostics-detail">{item.detail}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          </section>
+        </aside>
       </div>
     </section>
   );

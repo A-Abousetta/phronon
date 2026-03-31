@@ -1470,6 +1470,282 @@ select:disabled {
   padding: 0.16rem 0;
 }
 
+.settings-workspace {
+  gap: 1rem;
+}
+
+.settings-banner-copy {
+  max-width: 40rem;
+}
+
+.settings-banner-outline {
+  display: grid;
+  gap: 0.72rem;
+  width: min(100%, 21rem);
+}
+
+.settings-banner-outline-item {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 0.92rem;
+  border: 1px solid rgba(193, 241, 229, 0.1);
+  border-radius: 1.1rem;
+  background: linear-gradient(180deg, rgba(16, 25, 24, 0.9), rgba(11, 17, 16, 0.96));
+  box-shadow: var(--shadow-inset);
+}
+
+.settings-banner-outline-title {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #d7fff5;
+}
+
+.settings-banner-outline-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.93rem;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(18rem, 0.86fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.settings-main-column,
+.settings-support-column {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.settings-support-column {
+  position: sticky;
+  top: calc(5.35rem + var(--content-gutter));
+}
+
+.settings-region {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.settings-region-header {
+  max-width: 42rem;
+}
+
+.settings-subsection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.82rem;
+}
+
+.settings-subsection,
+.settings-help-aside {
+  display: grid;
+  gap: 0.82rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(193, 241, 229, 0.08);
+  border-radius: 1.18rem;
+  background: linear-gradient(180deg, rgba(17, 27, 25, 0.78), rgba(12, 19, 18, 0.9));
+  box-shadow: var(--shadow-inset);
+}
+
+.settings-subsection-emphasis {
+  grid-column: 1 / -1;
+  background: linear-gradient(180deg, rgba(23, 35, 33, 0.94), rgba(15, 23, 22, 0.98));
+}
+
+.settings-subsection-header {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.settings-subsection-header h4,
+.settings-diagnostics-group-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+  color: #f0fffb;
+}
+
+.settings-subsection-header p,
+.settings-diagnostics-group-header p,
+.settings-diagnostics-detail,
+.settings-voice-meta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.94rem;
+}
+
+.settings-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.82rem;
+}
+
+.settings-voice-layout,
+.settings-help-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(16rem, 0.92fr);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.settings-voice-primary {
+  display: grid;
+  gap: 0.78rem;
+}
+
+.settings-voice-list,
+.settings-diagnostics-list {
+  gap: 0.72rem;
+}
+
+.settings-voice-item,
+.settings-diagnostics-item {
+  display: grid;
+  gap: 0.34rem;
+  padding: 0.84rem 0.9rem;
+  border: 1px solid rgba(193, 241, 229, 0.1);
+  border-radius: 1.05rem;
+  background: linear-gradient(180deg, rgba(18, 29, 27, 0.94), rgba(13, 21, 20, 0.98));
+  box-shadow: var(--shadow-inset);
+}
+
+.settings-voice-name,
+.settings-diagnostics-name {
+  font-weight: 700;
+  color: #ebfffa;
+}
+
+.settings-empty-copy {
+  padding-top: 0.1rem;
+}
+
+.settings-shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.75rem;
+}
+
+.settings-help-region .settings-shortcut-group {
+  gap: 0.5rem;
+  padding: 0.9rem 0.95rem;
+  border: 1px solid rgba(193, 241, 229, 0.08);
+  border-radius: 1.1rem;
+  background: linear-gradient(180deg, rgba(17, 26, 25, 0.8), rgba(12, 18, 17, 0.92));
+  box-shadow: var(--shadow-inset);
+}
+
+.settings-help-region .settings-shortcut-group + .settings-shortcut-group {
+  padding-top: 0.9rem;
+  border-top: 0;
+}
+
+.settings-accessibility-list li {
+  color: var(--text-muted);
+}
+
+.settings-diagnostics-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.68rem;
+}
+
+.settings-diagnostics-summary-card {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.78rem 0.84rem;
+  border: 1px solid rgba(193, 241, 229, 0.1);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.024);
+  box-shadow: var(--shadow-inset);
+}
+
+.settings-diagnostics-summary-value {
+  font-size: 1.34rem;
+  font-weight: 800;
+  color: #f0fffb;
+}
+
+.settings-diagnostics-summary-label {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.settings-diagnostics-groups {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.settings-diagnostics-group {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.settings-diagnostics-group + .settings-diagnostics-group {
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(193, 241, 229, 0.08);
+}
+
+.settings-diagnostics-group-header {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.settings-diagnostics-item-top {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.settings-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.58rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border: 1px solid rgba(193, 241, 229, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-status-pill-ready {
+  color: #cff9ee;
+  background: rgba(84, 162, 142, 0.2);
+}
+
+.settings-status-pill-setup {
+  color: #ffe4a8;
+  background: rgba(133, 102, 37, 0.26);
+}
+
+.settings-status-pill-unavailable {
+  color: #ffc9c9;
+  background: rgba(108, 44, 44, 0.3);
+}
+
+.settings-status-pill-checking {
+  color: #d7efe9;
+  background: rgba(73, 98, 92, 0.28);
+}
+
+@media (max-width: 1180px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-support-column {
+    position: static;
+  }
+}
+
 @keyframes surface-enter {
   from {
     opacity: 0;
@@ -1564,6 +1840,17 @@ select:disabled {
     grid-template-columns: 1fr;
   }
 
+  .settings-layout,
+  .settings-subsection-grid,
+  .settings-voice-layout,
+  .settings-help-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-banner-outline {
+    width: 100%;
+  }
+
   .reader-panel-expanded {
     min-height: 24rem;
     min-block-size: 24rem;
@@ -1608,5 +1895,11 @@ select:disabled {
   .home-import-button {
     width: 100%;
     min-width: 0;
+  }
+
+  .settings-form-grid,
+  .settings-shortcuts-grid,
+  .settings-diagnostics-summary {
+    grid-template-columns: 1fr;
   }
 }
