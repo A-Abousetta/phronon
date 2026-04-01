@@ -7,8 +7,11 @@ import {
   buildReaderHighlightHintMessage,
   buildReaderRegionStatusMessage,
   buildReaderSavedItemAnnouncement,
+  buildReaderSavedReviewStatusMessage,
   buildReaderSearchResultAnnouncement,
-  buildReaderSearchStatusMessage
+  buildReaderSearchStatusMessage,
+  buildReaderStudyContextMessage,
+  buildReaderStudyOverviewMessage
 } from "./readerNavigation.js";
 
 test("buildReaderRegionStatusMessage keeps region feedback short and contextual", () => {
@@ -140,5 +143,62 @@ test("bookmark and highlight hints keep context without over-explaining", () => 
       activeHighlightPreview: null
     }),
     "Selection ready in paragraph 3: Light energy becomes chemical energy…"
+  );
+});
+
+test("study overview and context connect search with saved material", () => {
+  assert.equal(
+    buildReaderStudyOverviewMessage({
+      hasText: true,
+      searchQuery: "atom",
+      searchMatchCount: 4,
+      searchMatchParagraphCount: 3,
+      highlightCount: 2,
+      bookmarkCount: 1,
+      savedPointCount: 3,
+      savedParagraphCount: 2,
+      searchSavedPointCount: 2
+    }),
+    '4 matches across 3 paragraphs. 2 saved study points already sit in those results.'
+  );
+
+  assert.equal(
+    buildReaderStudyContextMessage({
+      hasText: true,
+      currentParagraphIndex: 5,
+      selectedParagraphIndex: null,
+      activeSearchMatchIndex: 1,
+      activeSearchMatchCount: 4,
+      activeSearchParagraphIndex: 5,
+      currentParagraphHasBookmark: true,
+      currentParagraphHighlightCount: 2
+    }),
+    "Current paragraph 6 contains match 2 of 4, a saved marker, and 2 saved highlights."
+  );
+});
+
+test("saved review status keeps revisit flow concise", () => {
+  assert.equal(
+    buildReaderSavedReviewStatusMessage({
+      savedPointCount: 0,
+      savedParagraphCount: 0,
+      activeSavedPointIndex: -1,
+      activeSavedPointKind: null,
+      activeSavedPointParagraphIndex: null,
+      activeSavedPointHasNote: false
+    }),
+    "No saved study points yet. Save a marker or highlight to review it later."
+  );
+
+  assert.equal(
+    buildReaderSavedReviewStatusMessage({
+      savedPointCount: 5,
+      savedParagraphCount: 3,
+      activeSavedPointIndex: 2,
+      activeSavedPointKind: "highlight",
+      activeSavedPointParagraphIndex: 7,
+      activeSavedPointHasNote: true
+    }),
+    "Highlight 3 of 5 is active at paragraph 8. Note ready."
   );
 });

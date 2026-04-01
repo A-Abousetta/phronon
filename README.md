@@ -140,6 +140,8 @@ When a document is loaded, Phronon also splits the extracted text into readable 
 ## Reader search
 The Reader now includes a compact in-document search for the currently loaded text. Enter a word or phrase, press `Search`, and Phronon looks through the current document text with simple case-insensitive matching. The search status reports the total number of matches and the current match position, and `Previous match` or `Next match` moves the current paragraph to the matching location without changing TXT, PDF, OCR, bookmark, or playback flows.
 
+The study tools rail now keeps search connected to saved work. A shared study summary shows current match counts, highlight and marker counts, and a compact review status so finding something important naturally leads into saving it and revisiting it later.
+
 ## Reader highlights
 The Reader now supports a small first version of inline text highlights. Select a word or short phrase inside one paragraph, add an optional short note, and press `Save highlight`. Phronon stores that highlight locally for the current document and renders it back inline when you reopen the same file.
 
@@ -165,6 +167,8 @@ On launch, Phronon restores the recent documents list and reading speed immediat
 Bookmarks now stay lightweight study markers. Each saved paragraph can include one short optional note, and that note is stored in the same local Reader persistence snapshot so it survives restarts without changing the wider Reader workflow.
 
 Reader highlights use the same local-first persistence snapshot. Saved highlights and their short notes stay scoped to the current document and reappear when that document is reopened.
+
+Inside Reader, bookmarks and highlights now also feed one shared saved-point review flow. The rail can move through saved study points in paragraph order, and the document text quietly shows which paragraphs already have saved markers or highlights.
 
 ## Low-vision display controls
 Phronon now includes a small set of low-vision-friendly display controls in `Settings` without changing the main workflow. Users can increase general app text size, increase Reader text size separately, and switch to a stronger contrast mode that makes surfaces, borders, status cards, and the reading area easier to distinguish while keeping the same calm layout.
