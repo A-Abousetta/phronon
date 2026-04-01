@@ -5,6 +5,8 @@ import {
   type BrowserSpeechRecognitionConstructor,
   VOICE_COMMAND_DETECTED_MESSAGE,
   VOICE_COMMAND_UNAVAILABLE_MESSAGE,
+  buildVoiceCommandIdleMessage,
+  buildVoiceCommandSupportMessage,
   didVoiceRecognitionEndBeforeCapture,
   getVoiceReaderCommand,
   getVoiceRecognitionAvailability,
@@ -44,6 +46,56 @@ test("getVoiceRecognitionAvailability reports support clearly", () => {
     available: false,
     message: VOICE_COMMAND_UNAVAILABLE_MESSAGE
   });
+});
+
+test("voice command Reader copy stays compact while keeping keyboard-first fallback explicit", () => {
+  assert.equal(
+    buildVoiceCommandIdleMessage({
+      availabilityMessage: VOICE_COMMAND_DETECTED_MESSAGE,
+      trustState: "detected"
+    }),
+    "Voice commands are available to try on this device. Still experimental until listening stays active."
+  );
+
+  assert.equal(
+    buildVoiceCommandIdleMessage({
+      availabilityMessage: VOICE_COMMAND_DETECTED_MESSAGE,
+      trustState: "confirmed"
+    }),
+    "Voice commands worked in this session. One exact English command per press."
+  );
+
+  assert.equal(
+    buildVoiceCommandIdleMessage({
+      availabilityMessage: VOICE_COMMAND_DETECTED_MESSAGE,
+      trustState: "unreliable"
+    }),
+    "Voice commands are unavailable here. Listening stopped before any speech was captured."
+  );
+
+  assert.equal(
+    buildVoiceCommandSupportMessage({
+      interactionDisabled: true,
+      trustState: "unsupported"
+    }),
+    "Keyboard shortcuts and screen readers stay primary. Voice support needs browser speech recognition."
+  );
+
+  assert.equal(
+    buildVoiceCommandSupportMessage({
+      interactionDisabled: true,
+      trustState: "unreliable"
+    }),
+    "Keyboard shortcuts and screen readers stay primary. Voice listening was not reliable here."
+  );
+
+  assert.equal(
+    buildVoiceCommandSupportMessage({
+      interactionDisabled: false,
+      trustState: "confirmed"
+    }),
+    "Keyboard shortcuts and screen readers stay primary. Voice commands stay experimental."
+  );
 });
 
 test("voice recognition capture activity requires audio, speech, or a handled result", () => {

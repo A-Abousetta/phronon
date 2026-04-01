@@ -75,11 +75,14 @@ import {
   type BrowserSpeechRecognition,
   type BrowserSpeechRecognitionErrorEvent,
   type BrowserSpeechRecognitionEvent,
+  buildVoiceCommandIdleMessage,
+  buildVoiceCommandSupportMessage,
   didVoiceRecognitionEndBeforeCapture,
   getVoiceReaderCommand,
   getVoiceRecognitionAvailability,
   getVoiceRecognitionConstructor,
   hasVoiceRecognitionCaptureActivity,
+  type VoiceCommandTrustState,
   type VoiceReaderCommand
 } from "./voiceCommands";
 import { buildRuntimeDiagnosticsItems, type RuntimeSupportStatus } from "./runtimeDiagnostics";
@@ -208,8 +211,6 @@ type VoiceCommandPhase =
   | "permissionDenied"
   | "unsupported"
   | "interrupted";
-
-type VoiceCommandTrustState = "unsupported" | "detected" | "confirmed" | "unreliable";
 
 type VoiceCommandSession = {
   attemptId: number;
@@ -962,13 +963,14 @@ function ReaderScreen(props: {
       }).length,
     [savedStudyPoints, searchMatchesByParagraph]
   );
-  const voiceCommandIdleMessage = !voiceRecognitionAvailable
-    ? voiceRecognitionAvailability.message
-    : voiceCommandTrustState === "confirmed"
-      ? "Experimental voice commands listened successfully in this session. They still accept one exact English Reader command per press, and keyboard shortcuts remain the reliable primary workflow."
-      : voiceCommandTrustState === "unreliable"
-        ? "Speech recognition was detected, but this Electron/Chromium runtime ended listening before any usable audio or speech was captured. Phronon is treating the voice button as unavailable here, and keyboard shortcuts remain the reliable primary workflow."
-        : `${voiceRecognitionAvailability.message} Keyboard shortcuts remain the reliable primary workflow.`;
+  const voiceCommandIdleMessage = buildVoiceCommandIdleMessage({
+    availabilityMessage: voiceRecognitionAvailability.message,
+    trustState: voiceCommandTrustState
+  });
+  const voiceCommandSupportMessage = buildVoiceCommandSupportMessage({
+    interactionDisabled: voiceCommandInteractionDisabled,
+    trustState: voiceCommandTrustState
+  });
   const searchStatusMessage = buildReaderSearchStatusMessage({
     isLoading: props.documentState.isLoading,
     hasText,
@@ -3415,16 +3417,14 @@ function ReaderScreen(props: {
                 {isListeningForVoiceCommand
                   ? "Stop listening"
                   : voiceCommandInteractionDisabled
-                    ? "Voice commands unavailable here"
+                    ? "Voice commands unavailable"
                     : "Listen for one command"}
               </button>
               <p id={voiceCommandStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
                 {voiceCommandMessage || voiceCommandIdleMessage}
               </p>
               <p id={voiceCommandSupportId} className="hint playback-voice-note">
-                {voiceCommandInteractionDisabled
-                  ? "Voice commands are currently downgraded on this device because this runtime did not keep listening reliably. Keyboard shortcuts and screen readers remain the reliable primary controls."
-                  : "Experimental. One exact English phrase per press. Keyboard shortcuts and screen readers remain the reliable primary controls."}
+                {voiceCommandSupportMessage}
               </p>
             </div>
             <div className="playback-illustration" aria-hidden="true">
@@ -3536,16 +3536,11 @@ function ReaderScreen(props: {
               </p>
             </div>
           </details>
-          <p className="hint reader-shortcuts-note">
-            Voice commands stay optional and experimental. They never replace keyboard shortcuts for reliable Reader
-            control.
-          </p>
           <details className="reader-shortcuts-details reader-voice-commands-details">
-            <summary className="reader-shortcuts-summary">Show supported voice commands</summary>
+            <summary className="reader-shortcuts-summary">Voice command list</summary>
             <div className="reader-shortcuts-reference" aria-label="Supported voice commands">
               <p className="hint reader-shortcuts-note">
-                Voice commands work only after you press `Listen for one command`, and they only respond to exact
-                English phrases.
+                Optional fallback. Press `Listen for one command`, then say one exact English phrase.
               </p>
               <ul className="simple-list reader-voice-command-list" aria-label="Supported Reader voice commands">
                 {readerVoiceCommandLabels.map((commandLabel) => (

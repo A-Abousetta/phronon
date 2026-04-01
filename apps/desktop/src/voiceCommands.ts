@@ -14,10 +14,10 @@ export type VoiceRecognitionAvailability = {
   message: string;
 };
 
-export const VOICE_COMMAND_DETECTED_MESSAGE =
-  "Experimental voice commands can be tried on this device because browser speech recognition was detected. Phronon will only treat them as working after listening stays active long enough to use.";
-export const VOICE_COMMAND_UNAVAILABLE_MESSAGE =
-  "Experimental voice commands are unavailable on this device. Reader voice commands need browser speech recognition support.";
+export type VoiceCommandTrustState = "unsupported" | "detected" | "confirmed" | "unreliable";
+
+export const VOICE_COMMAND_DETECTED_MESSAGE = "Voice commands are available to try on this device.";
+export const VOICE_COMMAND_UNAVAILABLE_MESSAGE = "Voice commands are unavailable on this device.";
 
 export type BrowserSpeechRecognitionAlternative = {
   transcript: string;
@@ -147,4 +147,36 @@ export function getVoiceRecognitionAvailability(windowObject: Window): VoiceReco
     available: false,
     message: VOICE_COMMAND_UNAVAILABLE_MESSAGE
   };
+}
+
+export function buildVoiceCommandIdleMessage(options: {
+  availabilityMessage: string;
+  trustState: VoiceCommandTrustState;
+}) {
+  switch (options.trustState) {
+    case "unsupported":
+      return options.availabilityMessage;
+    case "confirmed":
+      return "Voice commands worked in this session. One exact English command per press.";
+    case "unreliable":
+      return "Voice commands are unavailable here. Listening stopped before any speech was captured.";
+    case "detected":
+    default:
+      return `${options.availabilityMessage} Still experimental until listening stays active.`;
+  }
+}
+
+export function buildVoiceCommandSupportMessage(options: {
+  interactionDisabled: boolean;
+  trustState: VoiceCommandTrustState;
+}) {
+  if (options.trustState === "unsupported") {
+    return "Keyboard shortcuts and screen readers stay primary. Voice support needs browser speech recognition.";
+  }
+
+  if (options.trustState === "unreliable" && options.interactionDisabled) {
+    return "Keyboard shortcuts and screen readers stay primary. Voice listening was not reliable here.";
+  }
+
+  return "Keyboard shortcuts and screen readers stay primary. Voice commands stay experimental.";
 }
