@@ -88,9 +88,12 @@ import {
   buildReaderDocumentReturnAnnouncement,
   buildReaderHighlightHintMessage,
   buildReaderRegionStatusMessage,
+  buildReaderSavedReviewStatusMessage,
   buildReaderSavedItemAnnouncement,
   buildReaderSearchResultAnnouncement,
-  buildReaderSearchStatusMessage
+  buildReaderSearchStatusMessage,
+  buildReaderStudyContextMessage,
+  buildReaderStudyOverviewMessage
 } from "./readerNavigation";
 import phrononMasterArtwork from "./assets/images/phronon-master-1024.png";
 import keyboardModeArtwork from "./assets/images/Keyboard mode.png";
@@ -185,6 +188,14 @@ type HighlightRenderSegment = {
   text: string;
   highlight: TextHighlight | null;
   searchMatch: IndexedParagraphSearchMatch | null;
+};
+
+type SavedStudyPoint = {
+  id: string;
+  kind: "bookmark" | "highlight";
+  paragraphIndex: number;
+  note: string;
+  startOffset: number;
 };
 
 type VoiceCommandPhase =
@@ -464,6 +475,43 @@ function groupHighlightsByParagraph(highlights: TextHighlight[]) {
   });
 
   return highlightsByParagraph;
+}
+
+function groupBookmarksByParagraph(bookmarks: ParagraphBookmark[]) {
+  return new Map(bookmarks.map((bookmark) => [bookmark.paragraphIndex, bookmark] as const));
+}
+
+function buildSavedStudyPoints(bookmarks: ParagraphBookmark[], highlights: TextHighlight[]) {
+  const points: SavedStudyPoint[] = [
+    ...bookmarks.map((bookmark) => ({
+      id: `bookmark-${bookmark.paragraphIndex}`,
+      kind: "bookmark" as const,
+      paragraphIndex: bookmark.paragraphIndex,
+      note: bookmark.note,
+      startOffset: -1
+    })),
+    ...highlights.map((highlight) => ({
+      id: highlight.id,
+      kind: "highlight" as const,
+      paragraphIndex: highlight.paragraphIndex,
+      note: highlight.note,
+      startOffset: highlight.startOffset
+    }))
+  ];
+
+  points.sort((left, right) => {
+    if (left.paragraphIndex !== right.paragraphIndex) {
+      return left.paragraphIndex - right.paragraphIndex;
+    }
+
+    if (left.kind !== right.kind) {
+      return left.kind === "bookmark" ? -1 : 1;
+    }
+
+    return left.startOffset - right.startOffset;
+  });
+
+  return points;
 }
 
 function resolveParagraphTextOffset(container: HTMLElement, targetNode: Node, targetOffset: number) {
@@ -867,6 +915,7 @@ function ReaderScreen(props: {
   const searchInputId = useId();
   const searchLabelId = useId();
   const searchStatusId = useId();
+  const studyReviewStatusId = useId();
   const shortcutsReferenceId = useId();
   const bookmarkNoteInputId = useId();
   const bookmarkNoteHintId = useId();
@@ -879,7 +928,12 @@ function ReaderScreen(props: {
     [paragraphs, activeSearchQuery]
   );
   const searchMatchesByParagraph = useMemo(() => groupSearchMatchesByParagraph(searchMatches), [searchMatches]);
+  const bookmarksByParagraph = useMemo(() => groupBookmarksByParagraph(props.bookmarks), [props.bookmarks]);
   const highlightsByParagraph = useMemo(() => groupHighlightsByParagraph(props.highlights), [props.highlights]);
+  const savedStudyPoints = useMemo(
+    () => buildSavedStudyPoints(props.bookmarks, props.highlights),
+    [props.bookmarks, props.highlights]
+  );
   const hasText = Boolean(props.documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
   const isFilePickerLoading = props.activeLoad?.origin === "filePicker";
@@ -896,6 +950,17 @@ function ReaderScreen(props: {
     activeSearchMatchIndex >= 0 && activeSearchMatchIndex < searchMatches.length
       ? searchMatches[activeSearchMatchIndex]
       : null;
+  const savedStudyParagraphCount = useMemo(
+    () => new Set(savedStudyPoints.map((point) => point.paragraphIndex)).size,
+    [savedStudyPoints]
+  );
+  const searchSavedPointCount = useMemo(
+    () =>
+      savedStudyPoints.filter((point) => {
+        return searchMatchesByParagraph.has(point.paragraphIndex);
+      }).length,
+    [savedStudyPoints, searchMatchesByParagraph]
+  );
   const voiceCommandIdleMessage = !voiceRecognitionAvailable
     ? voiceRecognitionAvailability.message
     : voiceCommandTrustState === "confirmed"
@@ -2329,6 +2394,41 @@ function ReaderScreen(props: {
     handleJumpToHighlight(nextHighlight, nextHighlightIndex);
   }
 
+  function handleSavedStudyPointStep(direction: "previous" | "next") {
+    if (savedStudyPoints.length === 0) {
+      props.onAnnounce("No saved study points are ready for review yet.");
+      return;
+    }
+
+    const nextPointIndex =
+      activeSavedStudyPointIndex === -1
+        ? findDirectionalParagraphItemIndex(savedStudyPoints, props.currentParagraphIndex, direction)
+        : findNextItemIndex(savedStudyPoints.length, activeSavedStudyPointIndex, direction);
+    const nextPoint = savedStudyPoints[nextPointIndex];
+
+    if (!nextPoint) {
+      return;
+    }
+
+    if (nextPoint.kind === "bookmark") {
+      const bookmarkIndex = props.bookmarks.findIndex((bookmark) => bookmark.paragraphIndex === nextPoint.paragraphIndex);
+      const bookmark = bookmarkIndex === -1 ? null : props.bookmarks[bookmarkIndex];
+
+      if (bookmark) {
+        handleJumpToBookmark(bookmark, bookmarkIndex);
+      }
+
+      return;
+    }
+
+    const highlightIndex = props.highlights.findIndex((highlight) => highlight.id === nextPoint.id);
+    const highlight = highlightIndex === -1 ? null : props.highlights[highlightIndex];
+
+    if (highlight) {
+      handleJumpToHighlight(highlight, highlightIndex);
+    }
+  }
+
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -2516,8 +2616,8 @@ function ReaderScreen(props: {
   const currentParagraphPreview = paragraphs[props.currentParagraphIndex]
     ? buildBookmarkPreviewText(paragraphs[props.currentParagraphIndex], 72)
     : null;
-  const currentBookmark =
-    props.bookmarks.find((bookmark) => bookmark.paragraphIndex === props.currentParagraphIndex) ?? null;
+  const currentBookmark = bookmarksByParagraph.get(props.currentParagraphIndex) ?? null;
+  const currentParagraphHighlightCount = highlightsByParagraph.get(props.currentParagraphIndex)?.length ?? 0;
   const activeHighlight = props.highlights.find((highlight) => highlight.id === activeHighlightId) ?? null;
   const selectedExistingHighlight =
     selectedTextRange
@@ -2542,7 +2642,58 @@ function ReaderScreen(props: {
     activeHighlightParagraphIndex: activeHighlight?.paragraphIndex ?? null,
     activeHighlightPreview: activeHighlight ? buildBookmarkPreviewText(activeHighlight.selectedText, 68) : null
   });
+  const studyOverviewMessage = buildReaderStudyOverviewMessage({
+    hasText,
+    searchQuery: activeSearchQuery,
+    searchMatchCount: searchMatches.length,
+    searchMatchParagraphCount: searchMatchesByParagraph.size,
+    highlightCount: props.highlights.length,
+    bookmarkCount: props.bookmarks.length,
+    savedPointCount: savedStudyPoints.length,
+    savedParagraphCount: savedStudyParagraphCount,
+    searchSavedPointCount
+  });
+  const studyContextMessage = buildReaderStudyContextMessage({
+    hasText,
+    currentParagraphIndex: props.currentParagraphIndex,
+    selectedParagraphIndex: selectedTextRange?.paragraphIndex ?? null,
+    activeSearchMatchIndex,
+    activeSearchMatchCount: searchMatches.length,
+    activeSearchParagraphIndex: activeSearchMatch?.paragraphIndex ?? null,
+    currentParagraphHasBookmark: Boolean(currentBookmark),
+    currentParagraphHighlightCount
+  });
   const selectedParagraphIndex = selectedTextRange?.paragraphIndex ?? null;
+  const activeSavedStudyPointIndex = activeHighlightId
+    ? savedStudyPoints.findIndex((point) => point.kind === "highlight" && point.id === activeHighlightId)
+    : savedStudyPoints.findIndex((point) => point.paragraphIndex === props.currentParagraphIndex);
+  const activeSavedStudyPoint =
+    activeSavedStudyPointIndex >= 0 ? savedStudyPoints[activeSavedStudyPointIndex] : null;
+  const savedReviewStatusMessage = buildReaderSavedReviewStatusMessage({
+    savedPointCount: savedStudyPoints.length,
+    savedParagraphCount: savedStudyParagraphCount,
+    activeSavedPointIndex: activeSavedStudyPointIndex,
+    activeSavedPointKind: activeSavedStudyPoint?.kind ?? null,
+    activeSavedPointParagraphIndex: activeSavedStudyPoint?.paragraphIndex ?? null,
+    activeSavedPointHasNote: Boolean(activeSavedStudyPoint?.note)
+  });
+  const searchSectionMeta = !hasText
+    ? "Search will be ready when a file is loaded."
+    : !activeSearchQuery
+      ? "No active query yet."
+      : searchMatches.length === 0
+        ? `No matches for "${activeSearchQuery}".`
+        : searchSavedPointCount > 0
+          ? `${searchSavedPointCount} saved study point${searchSavedPointCount === 1 ? "" : "s"} already sit in these results.`
+          : `${searchMatches.length} match${searchMatches.length === 1 ? "" : "es"} across ${searchMatchesByParagraph.size} paragraph${searchMatchesByParagraph.size === 1 ? "" : "s"}.`;
+  const highlightSectionMeta =
+    props.highlights.length === 0
+      ? "No saved highlights yet."
+      : `${props.highlights.length} saved highlight${props.highlights.length === 1 ? "" : "s"} across ${highlightsByParagraph.size} paragraph${highlightsByParagraph.size === 1 ? "" : "s"}${currentParagraphHighlightCount > 0 ? `. Current paragraph has ${currentParagraphHighlightCount} highlight${currentParagraphHighlightCount === 1 ? "" : "s"}.` : "."}`;
+  const bookmarkSectionMeta =
+    props.bookmarks.length === 0
+      ? "No saved markers yet."
+      : `${props.bookmarks.length} saved marker${props.bookmarks.length === 1 ? "" : "s"}${currentBookmark ? ". Current paragraph is marked." : "."}`;
   const readerLandmarkStatusMessage = buildReaderRegionStatusMessage({
     activeRegion: activeReaderRegion,
     activeRegionLabel: activeReaderRegionLabel,
@@ -2994,6 +3145,53 @@ function ReaderScreen(props: {
               <p id={toolSuiteDescriptionId}>Search, highlights, and bookmarks stay together in one quiet rail.</p>
             </div>
 
+            <div className="reader-study-overview" aria-describedby={studyReviewStatusId}>
+              <div className="reader-study-overview-copy">
+                <p className="reader-toolbar-label">Study trail</p>
+                <p className="reader-study-overview-message">{studyOverviewMessage}</p>
+                <p className="reader-study-overview-context">{studyContextMessage}</p>
+              </div>
+              <div className="reader-study-chip-row" aria-label="Study tool summary">
+                <span className="reader-chip">
+                  {activeSearchQuery
+                    ? `${searchMatches.length} match${searchMatches.length === 1 ? "" : "es"}`
+                    : "Search ready"}
+                </span>
+                <span className="reader-chip">
+                  {props.highlights.length} highlight{props.highlights.length === 1 ? "" : "s"}
+                </span>
+                <span className="reader-chip">
+                  {props.bookmarks.length} marker{props.bookmarks.length === 1 ? "" : "s"}
+                </span>
+                <span className="reader-chip">
+                  {savedStudyPoints.length} study point{savedStudyPoints.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="reader-study-review-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => handleSavedStudyPointStep("previous")}
+                  disabled={savedStudyPoints.length === 0}
+                  aria-describedby={studyReviewStatusId}
+                >
+                  Previous saved
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => handleSavedStudyPointStep("next")}
+                  disabled={savedStudyPoints.length === 0}
+                  aria-describedby={studyReviewStatusId}
+                >
+                  Next saved
+                </button>
+              </div>
+              <p id={studyReviewStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                {savedReviewStatusMessage}
+              </p>
+            </div>
+
             <div className="reader-suite-sections">
               <section
                 ref={searchSectionRef}
@@ -3005,6 +3203,7 @@ function ReaderScreen(props: {
                   <div>
                     <p className="reader-toolbar-label">Search</p>
                     <h3>Find inside this document</h3>
+                    <p className="reader-tool-meta">{searchSectionMeta}</p>
                   </div>
                 </div>
                 <form className="reader-search-form" onSubmit={handleSearchSubmit}>
@@ -3068,6 +3267,7 @@ function ReaderScreen(props: {
                   <div>
                     <p className="reader-toolbar-label">Highlights</p>
                     <h3 id="reader-highlights-title">Short text highlights</h3>
+                    <p className="reader-tool-meta">{highlightSectionMeta}</p>
                   </div>
                   <div className="reader-highlight-actions">
                     <button
@@ -3112,45 +3312,56 @@ function ReaderScreen(props: {
                 </p>
                 {props.highlights.length > 0 ? (
                   <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
-                    {props.highlights.map((highlight, highlightIndex) => (
-                      <li key={highlight.id} className="bookmark-list-item highlight-list-item">
-                        <div
-                          className={
-                            highlight.id === activeHighlightId ? "bookmark-button highlight-card highlight-card-active" : "bookmark-button highlight-card"
-                          }
-                        >
-                          <button
-                            ref={(element) => {
-                              highlightOpenButtonRefs.current[highlightIndex] = element;
-                            }}
-                            type="button"
-                            className="highlight-card-open"
-                            onClick={() => handleJumpToHighlight(highlight, highlightIndex)}
-                            aria-controls={`reader-paragraph-${highlight.paragraphIndex}`}
+                    {props.highlights.map((highlight, highlightIndex) => {
+                      const isCurrentParagraph = highlight.paragraphIndex === props.currentParagraphIndex;
+                      const isSearchResult = searchMatchesByParagraph.has(highlight.paragraphIndex);
+
+                      return (
+                        <li key={highlight.id} className="bookmark-list-item highlight-list-item">
+                          <div
+                            className={
+                              highlight.id === activeHighlightId ? "bookmark-button highlight-card highlight-card-active" : "bookmark-button highlight-card"
+                            }
                           >
-                            <span className="bookmark-button-title">Paragraph {highlight.paragraphIndex + 1}</span>
-                            <span className="bookmark-button-preview">{highlight.previewText}</span>
-                            {highlight.note ? <span className="bookmark-button-note">Note: {highlight.note}</span> : null}
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button highlight-card-remove"
-                            onClick={() => {
-                              setActiveHighlightId(highlight.id);
-                              setHighlightNoteInputValue(highlight.note);
-                              props.onRemoveHighlight(highlight.id);
-                              setActiveHighlightId(null);
-                              setSelectedTextRange(null);
-                              clearBrowserSelection();
-                              setHighlightMessage(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
-                              props.onAnnounce(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
-                            }}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </li>
-                    ))}
+                            <button
+                              ref={(element) => {
+                                highlightOpenButtonRefs.current[highlightIndex] = element;
+                              }}
+                              type="button"
+                              className="highlight-card-open"
+                              onClick={() => handleJumpToHighlight(highlight, highlightIndex)}
+                              aria-controls={`reader-paragraph-${highlight.paragraphIndex}`}
+                            >
+                              <span className="bookmark-button-title">Paragraph {highlight.paragraphIndex + 1}</span>
+                              {isCurrentParagraph || isSearchResult ? (
+                                <span className="bookmark-button-tags" aria-hidden="true">
+                                  {isCurrentParagraph ? <span className="bookmark-button-tag">Current paragraph</span> : null}
+                                  {isSearchResult ? <span className="bookmark-button-tag">Search result</span> : null}
+                                </span>
+                              ) : null}
+                              <span className="bookmark-button-preview">{highlight.previewText}</span>
+                              {highlight.note ? <span className="bookmark-button-note">Note: {highlight.note}</span> : null}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button highlight-card-remove"
+                              onClick={() => {
+                                setActiveHighlightId(highlight.id);
+                                setHighlightNoteInputValue(highlight.note);
+                                props.onRemoveHighlight(highlight.id);
+                                setActiveHighlightId(null);
+                                setSelectedTextRange(null);
+                                clearBrowserSelection();
+                                setHighlightMessage(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
+                                props.onAnnounce(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : (
                   <p className="hint">Highlights will appear here after you select text and save one.</p>
@@ -3168,6 +3379,7 @@ function ReaderScreen(props: {
                   <div>
                     <p className="reader-toolbar-label">Bookmarks</p>
                     <h3 id="reader-bookmarks-title">Saved markers for this document</h3>
+                    <p className="reader-tool-meta">{bookmarkSectionMeta}</p>
                   </div>
                   <button type="button" onClick={handleAddBookmark} disabled={!hasText || !props.documentState.filePath}>
                     {bookmarkActionLabel}
@@ -3200,23 +3412,34 @@ function ReaderScreen(props: {
                 </p>
                 {props.bookmarks.length > 0 ? (
                   <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
-                    {props.bookmarks.map((bookmark, bookmarkIndex) => (
-                      <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
-                        <button
-                          ref={(element) => {
-                            bookmarkButtonRefs.current[bookmarkIndex] = element;
-                          }}
-                          type="button"
-                          className="bookmark-button"
-                          onClick={() => handleJumpToBookmark(bookmark, bookmarkIndex)}
-                          aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
-                        >
-                          <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
-                          <span className="bookmark-button-preview">{bookmark.previewText}</span>
-                          {bookmark.note ? <span className="bookmark-button-note">Note: {bookmark.note}</span> : null}
-                        </button>
-                      </li>
-                    ))}
+                    {props.bookmarks.map((bookmark, bookmarkIndex) => {
+                      const isCurrentParagraph = bookmark.paragraphIndex === props.currentParagraphIndex;
+                      const isSearchResult = searchMatchesByParagraph.has(bookmark.paragraphIndex);
+
+                      return (
+                        <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
+                          <button
+                            ref={(element) => {
+                              bookmarkButtonRefs.current[bookmarkIndex] = element;
+                            }}
+                            type="button"
+                            className="bookmark-button"
+                            onClick={() => handleJumpToBookmark(bookmark, bookmarkIndex)}
+                            aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
+                          >
+                            <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
+                            {isCurrentParagraph || isSearchResult ? (
+                              <span className="bookmark-button-tags" aria-hidden="true">
+                                {isCurrentParagraph ? <span className="bookmark-button-tag">Current paragraph</span> : null}
+                                {isSearchResult ? <span className="bookmark-button-tag">Search result</span> : null}
+                              </span>
+                            ) : null}
+                            <span className="bookmark-button-preview">{bookmark.previewText}</span>
+                            {bookmark.note ? <span className="bookmark-button-note">Note: {bookmark.note}</span> : null}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : (
                   <p className="hint">Bookmarks will appear here after you save one from the current paragraph.</p>
@@ -3336,73 +3559,93 @@ function ReaderScreen(props: {
         </p>
         {paragraphs.length > 0 ? (
           <div className="reader-text" role="list" aria-label="Document paragraphs">
-            {paragraphs.map((paragraph, index) => (
-              <article
-                key={`${index}-${paragraph.slice(0, 32)}`}
-                id={`reader-paragraph-${index}`}
-                ref={(element) => {
-                  paragraphRefs.current[index] = element;
-                }}
-                className={[
-                  "reader-paragraph",
-                  index === props.currentParagraphIndex ? "current-paragraph" : "",
-                  selectedParagraphIndex === index ? "reader-paragraph-selection-active" : "",
-                  searchMatchesByParagraph.has(index) ? "reader-paragraph-has-match" : "",
-                  activeSearchMatch?.paragraphIndex === index ? "reader-paragraph-active-match" : ""
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                role="listitem"
-                tabIndex={-1}
-                aria-labelledby={`reader-paragraph-label-${index}`}
-                aria-current={index === props.currentParagraphIndex ? "true" : undefined}
-                onFocusCapture={() => {
-                  if (props.currentParagraphIndex !== index) {
-                    props.onCurrentParagraphIndexChange(index);
-                  }
-                }}
-              >
-                <span id={`reader-paragraph-label-${index}`} className="reader-paragraph-meta">
-                  Paragraph {index + 1}
-                </span>
-                <p
-                  id={`reader-paragraph-body-${index}`}
+            {paragraphs.map((paragraph, index) => {
+              const paragraphBookmark = bookmarksByParagraph.get(index) ?? null;
+              const paragraphHighlights = highlightsByParagraph.get(index) ?? [];
+              const paragraphStudyParts = [
+                paragraphBookmark ? "Marker saved." : "",
+                paragraphHighlights.length > 0
+                  ? `${paragraphHighlights.length} highlight${paragraphHighlights.length === 1 ? "" : "s"} saved.`
+                  : ""
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const paragraphLabelId = `reader-paragraph-label-${index}`;
+              const paragraphStudyStatusId = `reader-paragraph-study-${index}`;
+
+              return (
+                <article
+                  key={`${index}-${paragraph.slice(0, 32)}`}
+                  id={`reader-paragraph-${index}`}
                   ref={(element) => {
-                    paragraphBodyRefs.current[index] = element;
+                    paragraphRefs.current[index] = element;
                   }}
-                  className="reader-paragraph-body"
+                  className={[
+                    "reader-paragraph",
+                    index === props.currentParagraphIndex ? "current-paragraph" : "",
+                    selectedParagraphIndex === index ? "reader-paragraph-selection-active" : "",
+                    searchMatchesByParagraph.has(index) ? "reader-paragraph-has-match" : "",
+                    activeSearchMatch?.paragraphIndex === index ? "reader-paragraph-active-match" : ""
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  role="listitem"
                   tabIndex={-1}
-                  aria-describedby={`reader-paragraph-label-${index}`}
-                  data-reader-paragraph-body="true"
-                  data-paragraph-index={index}
+                  aria-labelledby={paragraphLabelId}
+                  aria-current={index === props.currentParagraphIndex ? "true" : undefined}
+                  onFocusCapture={() => {
+                    if (props.currentParagraphIndex !== index) {
+                      props.onCurrentParagraphIndexChange(index);
+                    }
+                  }}
                 >
-                  {renderParagraphText(paragraph, index)}
-                </p>
-                {selectedTextRange && selectedTextRange.paragraphIndex === index ? (
-                  <div className="reader-selection-actions" role="group" aria-label={`Selected text actions for paragraph ${index + 1}`}>
-                    <p className="reader-selection-preview">
-                      Selected: <strong>{selectedTextRange.selectedText}</strong>
-                    </p>
-                    <div className="reader-selection-action-row">
-                      <button
-                        type="button"
-                        className="primary-button reader-selection-save"
-                        onClick={handleSaveHighlight}
-                        disabled={!props.documentState.filePath}
-                      >
-                        {highlightActionLabel}
-                      </button>
-                      <button type="button" className="secondary-button" onClick={clearPendingHighlightSelection}>
-                        Clear selection
-                      </button>
+                  <span id={paragraphLabelId} className="reader-paragraph-meta">
+                    Paragraph {index + 1}
+                  </span>
+                  {paragraphStudyParts ? (
+                    <span id={paragraphStudyStatusId} className="reader-paragraph-study-state">
+                      {paragraphStudyParts}
+                    </span>
+                  ) : null}
+                  <p
+                    id={`reader-paragraph-body-${index}`}
+                    ref={(element) => {
+                      paragraphBodyRefs.current[index] = element;
+                    }}
+                    className="reader-paragraph-body"
+                    tabIndex={-1}
+                    aria-describedby={paragraphStudyParts ? `${paragraphLabelId} ${paragraphStudyStatusId}` : paragraphLabelId}
+                    data-reader-paragraph-body="true"
+                    data-paragraph-index={index}
+                  >
+                    {renderParagraphText(paragraph, index)}
+                  </p>
+                  {selectedTextRange && selectedTextRange.paragraphIndex === index ? (
+                    <div className="reader-selection-actions" role="group" aria-label={`Selected text actions for paragraph ${index + 1}`}>
+                      <p className="reader-selection-preview">
+                        Selected: <strong>{selectedTextRange.selectedText}</strong>
+                      </p>
+                      <div className="reader-selection-action-row">
+                        <button
+                          type="button"
+                          className="primary-button reader-selection-save"
+                          onClick={handleSaveHighlight}
+                          disabled={!props.documentState.filePath}
+                        >
+                          {highlightActionLabel}
+                        </button>
+                        <button type="button" className="secondary-button" onClick={clearPendingHighlightSelection}>
+                          Clear selection
+                        </button>
+                      </div>
+                      <p className="hint reader-selection-hint">
+                        Save now to highlight this text immediately. You can edit or remove notes later in the highlights panel.
+                      </p>
                     </div>
-                    <p className="hint reader-selection-hint">
-                      Save now to highlight this text immediately. You can edit or remove notes later in the highlights panel.
-                    </p>
-                  </div>
-                ) : null}
-              </article>
-            ))}
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         ) : (
           <div className="reader-empty-state">

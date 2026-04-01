@@ -61,8 +61,52 @@ type ReaderHighlightHintOptions = {
   activeHighlightPreview: string | null;
 };
 
+type ReaderStudyOverviewOptions = {
+  hasText: boolean;
+  searchQuery: string;
+  searchMatchCount: number;
+  searchMatchParagraphCount: number;
+  highlightCount: number;
+  bookmarkCount: number;
+  savedPointCount: number;
+  savedParagraphCount: number;
+  searchSavedPointCount: number;
+};
+
+type ReaderStudyContextOptions = {
+  hasText: boolean;
+  currentParagraphIndex: number;
+  selectedParagraphIndex: number | null;
+  activeSearchMatchIndex: number;
+  activeSearchMatchCount: number;
+  activeSearchParagraphIndex: number | null;
+  currentParagraphHasBookmark: boolean;
+  currentParagraphHighlightCount: number;
+};
+
+type ReaderSavedReviewStatusOptions = {
+  savedPointCount: number;
+  savedParagraphCount: number;
+  activeSavedPointIndex: number;
+  activeSavedPointKind: "bookmark" | "highlight" | null;
+  activeSavedPointParagraphIndex: number | null;
+  activeSavedPointHasNote: boolean;
+};
+
 function formatCount(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function joinReadableList(items: string[]) {
+  if (items.length <= 1) {
+    return items[0] ?? "";
+  }
+
+  if (items.length === 2) {
+    return `${items[0]} and ${items[1]}`;
+  }
+
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
 export function buildReaderRegionStatusMessage(options: ReaderRegionStatusOptions) {
@@ -202,4 +246,83 @@ export function buildReaderHighlightHintMessage(options: ReaderHighlightHintOpti
   }
 
   return "Select a short passage in the document, then save it here.";
+}
+
+export function buildReaderStudyOverviewMessage(options: ReaderStudyOverviewOptions) {
+  if (!options.hasText) {
+    return "Open a file to connect search, highlights, and markers.";
+  }
+
+  if (options.searchQuery) {
+    if (options.searchMatchCount === 0) {
+      return `No matches for "${options.searchQuery}". ${formatCount(options.savedPointCount, "saved study point")} remain ready to revisit.`;
+    }
+
+    if (options.searchSavedPointCount > 0) {
+      return `${formatCount(options.searchMatchCount, "match", "matches")} across ${formatCount(options.searchMatchParagraphCount, "paragraph")}. ${formatCount(options.searchSavedPointCount, "saved study point")} already sit in those results.`;
+    }
+  }
+
+  if (options.savedPointCount === 0) {
+    return options.searchQuery
+      ? `${formatCount(options.searchMatchCount, "match", "matches")} ready. Save markers or highlights to build a return path.`
+      : "Search, highlights, and markers are ready for this document.";
+  }
+
+  return `${formatCount(options.savedPointCount, "saved study point")} across ${formatCount(options.savedParagraphCount, "paragraph")}. ${formatCount(options.highlightCount, "highlight")} and ${formatCount(options.bookmarkCount, "marker")} are ready to revisit.`;
+}
+
+export function buildReaderStudyContextMessage(options: ReaderStudyContextOptions) {
+  if (!options.hasText) {
+    return "Load a document to start building a study trail.";
+  }
+
+  if (options.selectedParagraphIndex !== null) {
+    return `Selected text in paragraph ${options.selectedParagraphIndex + 1} is ready to save as a highlight.`;
+  }
+
+  const paragraphNumber = options.currentParagraphIndex + 1;
+  const details: string[] = [];
+
+  if (
+    options.activeSearchParagraphIndex === options.currentParagraphIndex &&
+    options.activeSearchMatchIndex >= 0 &&
+    options.activeSearchMatchCount > 0
+  ) {
+    details.push(`match ${options.activeSearchMatchIndex + 1} of ${options.activeSearchMatchCount}`);
+  }
+
+  if (options.currentParagraphHasBookmark) {
+    details.push("a saved marker");
+  }
+
+  if (options.currentParagraphHighlightCount > 0) {
+    details.push(
+      options.currentParagraphHighlightCount === 1
+        ? "1 saved highlight"
+        : `${options.currentParagraphHighlightCount} saved highlights`
+    );
+  }
+
+  if (details.length > 0) {
+    return `Current paragraph ${paragraphNumber} contains ${joinReadableList(details)}.`;
+  }
+
+  return `Current paragraph ${paragraphNumber} is clear. Search, mark, or keep reading.`;
+}
+
+export function buildReaderSavedReviewStatusMessage(options: ReaderSavedReviewStatusOptions) {
+  if (options.savedPointCount === 0) {
+    return "No saved study points yet. Save a marker or highlight to review it later.";
+  }
+
+  if (
+    options.activeSavedPointIndex >= 0 &&
+    options.activeSavedPointKind &&
+    options.activeSavedPointParagraphIndex !== null
+  ) {
+    return `${options.activeSavedPointKind === "bookmark" ? "Marker" : "Highlight"} ${options.activeSavedPointIndex + 1} of ${options.savedPointCount} is active at paragraph ${options.activeSavedPointParagraphIndex + 1}.${options.activeSavedPointHasNote ? " Note ready." : ""}`;
+  }
+
+  return `Review ${formatCount(options.savedPointCount, "saved study point")} across ${formatCount(options.savedParagraphCount, "paragraph")}.`;
 }
