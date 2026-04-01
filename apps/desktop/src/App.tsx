@@ -1,4 +1,15 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import {
+  startTransition,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode
+} from "react";
 
 import {
   appShortcutDefinitions,
@@ -306,6 +317,7 @@ const groupedAppShortcuts = groupShortcutDefinitions(appShortcutDefinitions);
 const groupedReaderShortcuts = groupShortcutDefinitions(readerShortcutDefinitions);
 const settingsShortcutGroupLabelMap: Record<string, string> = {
   Global: "App-wide",
+  Landmarks: "Reader landmarks",
   Reading: "Reading flow",
   "Find and markers": "Search, bookmarks, and highlights"
 };
@@ -328,33 +340,50 @@ const readerVoiceCommandLabels = [
   "Faster",
   "Slower"
 ] as const;
-const readerToolJumpTargets = [
+const readerRegionDefinitions = [
   {
-    id: "playback",
-    label: "Playback"
+    id: "document",
+    label: "Document",
+    shortcutLabel: "Ctrl+1",
+    ariaKeyshortcuts: "Control+1"
   },
   {
-    id: "voice",
-    label: "Voice"
+    id: "playback",
+    label: "Playback",
+    shortcutLabel: "Ctrl+2",
+    ariaKeyshortcuts: "Control+2"
   },
   {
     id: "search",
-    label: "Search"
+    label: "Search",
+    shortcutLabel: "Ctrl+3",
+    ariaKeyshortcuts: "Control+3"
   },
   {
     id: "highlights",
-    label: "Highlights"
+    label: "Highlights",
+    shortcutLabel: "Ctrl+4",
+    ariaKeyshortcuts: "Control+4"
   },
   {
     id: "bookmarks",
-    label: "Bookmarks"
+    label: "Bookmarks",
+    shortcutLabel: "Ctrl+5",
+    ariaKeyshortcuts: "Control+5"
   },
   {
     id: "help",
-    label: "Help"
+    label: "Help",
+    shortcutLabel: "Ctrl+6",
+    ariaKeyshortcuts: "Control+6"
   }
-] as const;
-type ReaderToolJumpTarget = (typeof readerToolJumpTargets)[number]["id"];
+] as const satisfies ReadonlyArray<{
+  id: "document" | "playback" | "search" | "highlights" | "bookmarks" | "help";
+  label: string;
+  shortcutLabel?: string;
+  ariaKeyshortcuts?: string;
+}>;
+type ReaderRegionId = (typeof readerRegionDefinitions)[number]["id"];
 
 function buildLoadedDocumentAnnouncement(result: OpenDocumentSuccessResult, paragraphIndex: number) {
   const paragraphs = splitIntoParagraphs(result.text);
@@ -779,9 +808,11 @@ function ReaderScreen(props: {
   const voiceCommandStartRequestRef = useRef(0);
   const nextVoiceCommandAttemptIdRef = useRef(0);
   const paragraphRefs = useRef<Array<HTMLElement | null>>([]);
+  const paragraphBodyRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const searchMatchRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const bookmarkButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const highlightOpenButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const readerWorkspaceRef = useRef<HTMLElement | null>(null);
   const readerPanelRef = useRef<HTMLDivElement | null>(null);
   const openFileButtonRef = useRef<HTMLButtonElement | null>(null);
   const playButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -791,24 +822,34 @@ function ReaderScreen(props: {
   const bookmarkNoteInputRef = useRef<HTMLInputElement | null>(null);
   const highlightNoteInputRef = useRef<HTMLInputElement | null>(null);
   const highlightSaveButtonRef = useRef<HTMLButtonElement | null>(null);
+  const playbackSectionRef = useRef<HTMLElement | null>(null);
+  const searchSectionRef = useRef<HTMLElement | null>(null);
   const bookmarkSectionRef = useRef<HTMLElement | null>(null);
   const highlightSectionRef = useRef<HTMLElement | null>(null);
+  const helpSectionRef = useRef<HTMLElement | null>(null);
   const playbackRangeRef = useRef<PlaybackRange | null>(null);
   const playbackPositionRef = useRef<PlaybackPosition | null>(null);
   const playbackSessionRef = useRef(0);
   const playbackStateRef = useRef<PlaybackState>("idle");
   const playbackRateRef = useRef(props.playbackRate);
+  const activeReaderRegionRef = useRef<ReaderRegionId>("document");
   const restartPausedParagraphRef = useRef(false);
   const shouldFocusSearchMatchRef = useRef(false);
+  const [activeReaderRegion, setActiveReaderRegion] = useState<ReaderRegionId>("document");
   const headingId = useId();
   const summaryTitleId = useId();
   const statusId = useId();
   const positionStatusId = useId();
+  const readerLandmarkHintId = useId();
   const shortcutsHintId = useId();
   const documentRegionTitleId = useId();
   const documentRegionHintId = useId();
+  const playbackRegionTitleId = useId();
+  const playbackRegionHintId = useId();
   const toolSuiteTitleId = useId();
   const toolSuiteDescriptionId = useId();
+  const helpRegionTitleId = useId();
+  const helpRegionHintId = useId();
   const speedInputId = useId();
   const speedValueId = useId();
   const voiceCommandStatusId = useId();
@@ -865,32 +906,50 @@ function ReaderScreen(props: {
             : activeSearchMatch
               ? `Match ${activeSearchMatchIndex + 1} of ${searchMatches.length} in paragraph ${activeSearchMatch.paragraphIndex + 1}. ${matchedParagraphCount} paragraph${matchedParagraphCount === 1 ? "" : "s"} contain ${matchedParagraphCount === 1 ? "this result" : "results"}.`
             : `${searchMatches.length} matches found for "${activeSearchQuery}".`;
+  const activeReaderRegionLabel =
+    readerRegionDefinitions.find((definition) => definition.id === activeReaderRegion)?.label ?? "Document";
 
-  function focusParagraph(paragraphIndex: number) {
-    readerPanelRef.current?.focus();
-    paragraphRefs.current[paragraphIndex]?.focus();
+  function resolveReaderRegionLabel(region: ReaderRegionId) {
+    return readerRegionDefinitions.find((definition) => definition.id === region)?.label ?? "Document";
   }
 
-  function focusReaderToolTarget(target: ReaderToolJumpTarget) {
-    switch (target) {
+  function resolveReaderRegionFromTarget(target: EventTarget | null): ReaderRegionId | null {
+    if (!(target instanceof HTMLElement)) {
+      return null;
+    }
+
+    const regionId = target.closest<HTMLElement>("[data-reader-region]")?.dataset.readerRegion;
+
+    switch (regionId) {
+      case "document":
       case "playback":
-        playButtonRef.current?.focus();
-        return;
-      case "voice":
-        voiceCommandButtonRef.current?.focus();
-        return;
       case "search":
-        searchInputRef.current?.focus();
-        return;
       case "highlights":
-        highlightSectionRef.current?.focus();
-        return;
       case "bookmarks":
-        bookmarkSectionRef.current?.focus();
-        return;
       case "help":
-        shortcutsSummaryRef.current?.focus();
-        return;
+        return regionId;
+      default:
+        return null;
+    }
+  }
+
+  function focusParagraph(paragraphIndex: number) {
+    const safeParagraphIndex = paragraphs.length === 0 ? 0 : Math.min(Math.max(paragraphIndex, 0), paragraphs.length - 1);
+    const paragraphBody = paragraphBodyRefs.current[safeParagraphIndex];
+    const paragraphArticle = paragraphRefs.current[safeParagraphIndex];
+
+    paragraphBody?.scrollIntoView({
+      block: "center",
+      inline: "nearest"
+    });
+    paragraphBody?.focus();
+    paragraphArticle?.scrollIntoView({
+      block: "center",
+      inline: "nearest"
+    });
+
+    if (!paragraphBody && !paragraphArticle) {
+      readerPanelRef.current?.focus();
     }
   }
 
@@ -910,6 +969,30 @@ function ReaderScreen(props: {
 
   function buildHighlightAnnouncement(highlight: TextHighlight, highlightIndex: number) {
     return `Highlight ${highlightIndex + 1} of ${props.highlights.length} in paragraph ${highlight.paragraphIndex + 1}. Reader text focused${highlight.note ? ". Note loaded." : "."}`;
+  }
+
+  function buildDocumentFocusAnnouncement(sourceRegion: ReaderRegionId | null) {
+    if (!hasText) {
+      return "Reader text will be available after a document is loaded.";
+    }
+
+    const messageParts = [
+      sourceRegion && sourceRegion !== "document"
+        ? `Returned to paragraph ${props.currentParagraphIndex + 1} from ${resolveReaderRegionLabel(sourceRegion).toLowerCase()}.`
+        : `Reader text focused at paragraph ${props.currentParagraphIndex + 1}.`
+    ];
+
+    if (activeSearchMatch && activeSearchMatch.paragraphIndex === props.currentParagraphIndex) {
+      messageParts.push(`Search result ${activeSearchMatchIndex + 1} of ${searchMatches.length} remains active.`);
+    } else if (activeHighlight && activeHighlight.paragraphIndex === props.currentParagraphIndex) {
+      messageParts.push(activeHighlight.note ? "Highlight note remains loaded." : "A saved highlight remains active here.");
+    } else if (currentBookmark?.paragraphIndex === props.currentParagraphIndex) {
+      messageParts.push(
+        currentBookmark.note ? "This paragraph already has a saved marker and note." : "This paragraph already has a saved marker."
+      );
+    }
+
+    return messageParts.join(" ");
   }
 
   function logVoiceCommandDiagnostic(eventName: string, details?: Record<string, unknown>) {
@@ -1436,6 +1519,34 @@ function ReaderScreen(props: {
 
     openFileButtonRef.current?.focus();
   }, [hasText, props.currentParagraphIndex, props.focusRequest]);
+
+  const handleReaderWorkspaceFocusIn = useEffectEvent((event: FocusEvent) => {
+    const nextRegion = resolveReaderRegionFromTarget(event.target);
+
+    if (!nextRegion || nextRegion === activeReaderRegionRef.current) {
+      return;
+    }
+
+    activeReaderRegionRef.current = nextRegion;
+
+    startTransition(() => {
+      setActiveReaderRegion(nextRegion);
+    });
+  });
+
+  useEffect(() => {
+    const readerWorkspace = readerWorkspaceRef.current;
+
+    if (!readerWorkspace) {
+      return;
+    }
+
+    readerWorkspace.addEventListener("focusin", handleReaderWorkspaceFocusIn);
+
+    return () => {
+      readerWorkspace.removeEventListener("focusin", handleReaderWorkspaceFocusIn);
+    };
+  }, [handleReaderWorkspaceFocusIn]);
 
   async function handleOpenFile() {
     await props.onOpenDocument();
@@ -2024,6 +2135,15 @@ function ReaderScreen(props: {
     props.onCurrentParagraphIndexChange(nextMatch.paragraphIndex);
   }
 
+  function focusPlaybackTool() {
+    playButtonRef.current?.focus();
+    props.onAnnounce(
+      hasText
+        ? `Jumped to playback. Play button focused for paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
+        : "Jumped to playback. Open a document to begin reading."
+    );
+  }
+
   function focusSearchInput() {
     if (!hasText || props.documentState.isLoading) {
       props.onAnnounce("Search is not ready until a document is loaded.");
@@ -2032,13 +2152,19 @@ function ReaderScreen(props: {
 
     searchInputRef.current?.focus();
     searchInputRef.current?.select();
-    props.onAnnounce("Reader search focused.");
+    props.onAnnounce(
+      activeSearchQuery
+        ? searchMatches.length > 0
+          ? `Jumped to search. Search field focused. ${searchMatches.length} result${searchMatches.length === 1 ? "" : "s"} are ready for ${activeSearchQuery}.`
+          : `Jumped to search. Search field focused. No matches found for ${activeSearchQuery}.`
+        : "Jumped to search. Search field focused."
+    );
   }
 
   function focusBookmarkTool() {
     if (!hasText || !props.documentState.filePath) {
       bookmarkSectionRef.current?.focus();
-      props.onAnnounce("Bookmarks will be available after a document is loaded.");
+      props.onAnnounce("Jumped to bookmarks. Bookmarks will be available after a document is loaded.");
       return;
     }
 
@@ -2051,7 +2177,7 @@ function ReaderScreen(props: {
     if (targetButton) {
       targetButton.focus();
       props.onAnnounce(
-        `Bookmarks focused. Current paragraph ${props.currentParagraphIndex + 1} already has a saved marker.`
+        `Jumped to bookmarks. Current paragraph ${props.currentParagraphIndex + 1} already has a saved marker.`
       );
       return;
     }
@@ -2060,15 +2186,15 @@ function ReaderScreen(props: {
     bookmarkNoteInputRef.current?.select();
     props.onAnnounce(
       props.bookmarks.length > 0
-        ? `Bookmarks focused. Add or update a note for paragraph ${props.currentParagraphIndex + 1}, or tab to saved markers.`
-        : `Bookmarks focused. No saved markers yet. You can save a marker for paragraph ${props.currentParagraphIndex + 1}.`
+        ? `Jumped to bookmarks. Add or update a note for paragraph ${props.currentParagraphIndex + 1}, or tab to saved markers.`
+        : `Jumped to bookmarks. No saved markers yet. You can save a marker for paragraph ${props.currentParagraphIndex + 1}.`
     );
   }
 
   function focusHighlightTool() {
     if (!hasText || !props.documentState.filePath) {
       highlightSectionRef.current?.focus();
-      props.onAnnounce("Highlights will be available after a document is loaded.");
+      props.onAnnounce("Jumped to highlights. Highlights will be available after a document is loaded.");
       return;
     }
 
@@ -2081,7 +2207,7 @@ function ReaderScreen(props: {
     if (targetButton) {
       targetButton.focus();
       props.onAnnounce(
-        `Highlights focused. Paragraph ${props.highlights[currentHighlightIndex].paragraphIndex + 1} is ready for review.`
+        `Jumped to highlights. Paragraph ${props.highlights[currentHighlightIndex].paragraphIndex + 1} is ready for review.`
       );
       return;
     }
@@ -2089,25 +2215,30 @@ function ReaderScreen(props: {
     if ((selectedTextRange || activeHighlightId) && highlightNoteInputRef.current && !highlightNoteInputRef.current.disabled) {
       highlightNoteInputRef.current.focus();
       highlightNoteInputRef.current.select();
-      props.onAnnounce("Highlights focused. The highlight note field is ready.");
+      props.onAnnounce("Jumped to highlights. The highlight note field is ready.");
       return;
     }
 
     if (selectedTextRange && highlightSaveButtonRef.current && !highlightSaveButtonRef.current.disabled) {
       highlightSaveButtonRef.current.focus();
-      props.onAnnounce(`Highlights focused. Selected text in paragraph ${selectedTextRange.paragraphIndex + 1} is ready to save.`);
+      props.onAnnounce(`Jumped to highlights. Selected text in paragraph ${selectedTextRange.paragraphIndex + 1} is ready to save.`);
       return;
     }
 
     highlightSectionRef.current?.focus();
     props.onAnnounce(
       props.highlights.length > 0
-        ? "Highlights focused. Tab to review saved highlights."
-        : "Highlights focused. Select text in the document to save a new highlight."
+        ? "Jumped to highlights. Tab to review saved highlights."
+        : "Jumped to highlights. Select text in the document to save a new highlight."
     );
   }
 
-  function focusReaderTextRegion() {
+  function focusHelpRegion() {
+    shortcutsSummaryRef.current?.focus();
+    props.onAnnounce("Jumped to help. Reader shortcut help focused. Landmark jumps use Ctrl+1 through Ctrl+6.");
+  }
+
+  function focusReaderTextRegion(sourceRegion: ReaderRegionId | null = activeReaderRegionRef.current) {
     if (!hasText) {
       readerPanelRef.current?.focus();
       props.onAnnounce("Reader text will be available after a document is loaded.");
@@ -2115,7 +2246,30 @@ function ReaderScreen(props: {
     }
 
     focusParagraph(props.currentParagraphIndex);
-    props.onAnnounce(`Reader text focused at paragraph ${props.currentParagraphIndex + 1}.`);
+    props.onAnnounce(buildDocumentFocusAnnouncement(sourceRegion));
+  }
+
+  function focusReaderRegion(target: ReaderRegionId) {
+    switch (target) {
+      case "document":
+        focusReaderTextRegion(activeReaderRegionRef.current === "document" ? null : activeReaderRegionRef.current);
+        return;
+      case "playback":
+        focusPlaybackTool();
+        return;
+      case "search":
+        focusSearchInput();
+        return;
+      case "highlights":
+        focusHighlightTool();
+        return;
+      case "bookmarks":
+        focusBookmarkTool();
+        return;
+      case "help":
+        focusHelpRegion();
+        return;
+    }
   }
 
   function jumpToBookmarkByShortcut(direction: "previous" | "next") {
@@ -2225,104 +2379,97 @@ function ReaderScreen(props: {
     props.onAnnounce(buildSearchResultAnnouncement(safeMatchIndex));
   }
 
-  useEffect(() => {
-    function handleReaderKeydown(event: KeyboardEvent) {
-      const action = getReaderShortcutAction(event);
+  const handleReaderKeydown = useEffectEvent((event: KeyboardEvent) => {
+    const action = getReaderShortcutAction(event);
+    const isEscapeShortcut = event.key === "Escape" || event.code === "Escape";
 
-      if (!action) {
-        return;
-      }
-
-      if (isInteractiveElement(event.target) && action !== "focusReaderText") {
-        return;
-      }
-
-      event.preventDefault();
-
-      switch (action) {
-        case "togglePlayPause":
-          if (playbackStateRef.current === "playing") {
-            handlePause();
-          } else {
-            handlePlay();
-          }
-          return;
-        case "stop":
-          handleStop();
-          return;
-        case "nextParagraph":
-          props.onCurrentParagraphIndexChange(
-            paragraphs.length === 0 ? 0 : Math.min(props.currentParagraphIndex + 1, paragraphs.length - 1)
-          );
-          return;
-        case "previousParagraph":
-          props.onCurrentParagraphIndexChange(Math.max(props.currentParagraphIndex - 1, 0));
-          return;
-        case "repeatCurrentParagraph":
-          handleRepeatCurrentParagraph();
-          return;
-        case "increaseSpeed":
-          changePlaybackRate(0.1);
-          return;
-        case "decreaseSpeed":
-          changePlaybackRate(-0.1);
-          return;
-        case "focusSearch":
-          focusSearchInput();
-          return;
-        case "nextSearchMatch":
-          handleSearchStep("next");
-          return;
-        case "previousSearchMatch":
-          handleSearchStep("previous");
-          return;
-        case "saveBookmark":
-          handleAddBookmark();
-          return;
-        case "focusBookmarks":
-          focusBookmarkTool();
-          return;
-        case "nextBookmark":
-          jumpToBookmarkByShortcut("next");
-          return;
-        case "previousBookmark":
-          jumpToBookmarkByShortcut("previous");
-          return;
-        case "focusHighlights":
-          focusHighlightTool();
-          return;
-        case "nextHighlight":
-          jumpToHighlightByShortcut("next");
-          return;
-        case "previousHighlight":
-          jumpToHighlightByShortcut("previous");
-          return;
-        case "focusReaderText":
-          focusReaderTextRegion();
-          return;
-      }
+    if (!action) {
+      return;
     }
 
+    if (isInteractiveElement(event.target) && !isEscapeShortcut) {
+      return;
+    }
+
+    event.preventDefault();
+
+    switch (action) {
+      case "togglePlayPause":
+        if (playbackStateRef.current === "playing") {
+          handlePause();
+        } else {
+          handlePlay();
+        }
+        return;
+      case "stop":
+        handleStop();
+        return;
+      case "nextParagraph":
+        props.onCurrentParagraphIndexChange(
+          paragraphs.length === 0 ? 0 : Math.min(props.currentParagraphIndex + 1, paragraphs.length - 1)
+        );
+        return;
+      case "previousParagraph":
+        props.onCurrentParagraphIndexChange(Math.max(props.currentParagraphIndex - 1, 0));
+        return;
+      case "repeatCurrentParagraph":
+        handleRepeatCurrentParagraph();
+        return;
+      case "increaseSpeed":
+        changePlaybackRate(0.1);
+        return;
+      case "decreaseSpeed":
+        changePlaybackRate(-0.1);
+        return;
+      case "focusPlayback":
+        focusPlaybackTool();
+        return;
+      case "focusSearch":
+        focusSearchInput();
+        return;
+      case "nextSearchMatch":
+        handleSearchStep("next");
+        return;
+      case "previousSearchMatch":
+        handleSearchStep("previous");
+        return;
+      case "saveBookmark":
+        handleAddBookmark();
+        return;
+      case "focusBookmarks":
+        focusBookmarkTool();
+        return;
+      case "nextBookmark":
+        jumpToBookmarkByShortcut("next");
+        return;
+      case "previousBookmark":
+        jumpToBookmarkByShortcut("previous");
+        return;
+      case "focusHighlights":
+        focusHighlightTool();
+        return;
+      case "nextHighlight":
+        jumpToHighlightByShortcut("next");
+        return;
+      case "previousHighlight":
+        jumpToHighlightByShortcut("previous");
+        return;
+      case "focusHelp":
+        focusHelpRegion();
+        return;
+      case "focusReaderText":
+        focusReaderTextRegion(activeReaderRegionRef.current === "document" ? null : activeReaderRegionRef.current);
+        return;
+    }
+  });
+
+  useEffect(() => {
     window.addEventListener("keydown", handleReaderKeydown);
 
     return () => {
       window.removeEventListener("keydown", handleReaderKeydown);
     };
-  }, [
-    activeHighlightId,
-    handleAddBookmark,
-    paragraphs.length,
-    props.bookmarks,
-    props.currentParagraphIndex,
-    props.documentState.isLoading,
-    props.documentState.text,
-    props.highlights,
-    props.onAnnounce,
-    props.onCurrentParagraphIndexChange,
-    props.documentState.filePath,
-    searchMatches.length,
-    selectedTextRange
-  ]);
+  }, [handleReaderKeydown]);
 
   const statusMessage = buildReaderDocumentStatusMessage({
     isLoading: props.documentState.isLoading,
@@ -2387,6 +2534,26 @@ function ReaderScreen(props: {
         ? `Selected saved highlight in paragraph ${activeHighlight.paragraphIndex + 1}: ${activeHighlight.selectedText}`
         : "Select a word or short phrase in the Reader text, then save it as a highlight.";
   const selectedParagraphIndex = selectedTextRange?.paragraphIndex ?? null;
+  const readerLandmarkStatusMessage =
+    activeReaderRegion === "document"
+      ? paragraphs.length > 0
+        ? `Current area: ${activeReaderRegionLabel}. Paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
+        : `Current area: ${activeReaderRegionLabel}. No document loaded yet.`
+      : activeReaderRegion === "search"
+        ? activeSearchQuery
+          ? searchMatches.length > 0
+            ? `Current area: ${activeReaderRegionLabel}. ${searchMatches.length} result${searchMatches.length === 1 ? "" : "s"} ready for ${activeSearchQuery}.`
+            : `Current area: ${activeReaderRegionLabel}. No matches found for ${activeSearchQuery}.`
+          : `Current area: ${activeReaderRegionLabel}. Search field ready.`
+        : activeReaderRegion === "highlights"
+          ? `Current area: ${activeReaderRegionLabel}. ${props.highlights.length} saved highlight${props.highlights.length === 1 ? "" : "s"} in this document.`
+          : activeReaderRegion === "bookmarks"
+            ? `Current area: ${activeReaderRegionLabel}. ${props.bookmarks.length} saved marker${props.bookmarks.length === 1 ? "" : "s"} in this document.`
+            : activeReaderRegion === "help"
+              ? "Current area: Help. Shortcut summary and navigation guidance are ready."
+              : paragraphs.length > 0
+                ? `Current area: ${activeReaderRegionLabel}. Paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
+                : `Current area: ${activeReaderRegionLabel}. Open a document to begin reading.`;
 
   useEffect(() => {
     setBookmarkMessage(
@@ -2586,7 +2753,11 @@ function ReaderScreen(props: {
   }
 
   return (
-    <section className="reader-workspace" aria-labelledby={headingId}>
+    <section
+      ref={readerWorkspaceRef}
+      className="reader-workspace"
+      aria-labelledby={headingId}
+    >
       <div className="reader-top-band">
         <section className="reader-toolbar" aria-labelledby={summaryTitleId}>
           <div className="reader-toolbar-main">
@@ -2640,30 +2811,45 @@ function ReaderScreen(props: {
           </div>
         </section>
 
-        <div className="reader-utility-area" aria-label="Reader tools">
-          <nav className="reader-tool-jump-nav" aria-label="Jump between Reader tools">
+        <aside className="reader-utility-area" aria-label="Reader tools and landmarks">
+          <nav className="reader-tool-jump-nav" aria-label="Jump between Reader regions" aria-describedby={readerLandmarkHintId}>
             <p className="reader-tool-jump-label">Jump to</p>
             <div className="reader-tool-jump-list">
-              {readerToolJumpTargets.map((jumpTarget) => (
+              {readerRegionDefinitions.map((jumpTarget) => (
                 <button
                   key={jumpTarget.id}
                   className="reader-tool-jump-button"
                   type="button"
-                  onClick={() => focusReaderToolTarget(jumpTarget.id)}
+                  data-current={activeReaderRegion === jumpTarget.id ? "true" : undefined}
+                  aria-keyshortcuts={jumpTarget.ariaKeyshortcuts}
+                  onClick={() => focusReaderRegion(jumpTarget.id)}
                 >
-                  {jumpTarget.label}
+                  <span className="reader-tool-jump-button-label">{jumpTarget.label}</span>
+                  <span className="reader-tool-jump-shortcut">{jumpTarget.shortcutLabel}</span>
                 </button>
               ))}
             </div>
+            <p id={readerLandmarkHintId} className="hint reader-region-status">
+              {readerLandmarkStatusMessage} Landmark jumps use `Ctrl+1` through `Ctrl+6`.
+            </p>
           </nav>
 
-          <section className="reader-playback-bar" aria-labelledby={shortcutsHintId}>
+          <section
+            ref={playbackSectionRef}
+            className="reader-playback-bar"
+            data-reader-region="playback"
+            aria-labelledby={playbackRegionTitleId}
+            aria-describedby={playbackRegionHintId}
+          >
             <div className="reader-tool-header">
               <div>
                 <p className="reader-toolbar-label">Playback</p>
-                <h3>Reading controls</h3>
+                <h3 id={playbackRegionTitleId}>Reading controls</h3>
               </div>
             </div>
+            <p id={playbackRegionHintId} className="hint">
+              Playback stays within easy reach here. Press `Escape` or `Ctrl+1` to return to the current paragraph.
+            </p>
             <div className="playback-row" role="group" aria-label="Primary playback actions">
               <div className="playback-group playback-group-primary">
                 <button
@@ -2796,76 +2982,6 @@ function ReaderScreen(props: {
                   {voiceStatusMessage}
                 </p>
               ) : null}
-              <div id={shortcutsHintId} className="reader-shortcuts-compact">
-                <p className="hint reader-shortcuts-note">
-                  Keyboard: `Space` play or pause, `J` and `K` move by paragraph, `Ctrl+F` opens search, `Ctrl+Shift+B`
-                  opens bookmarks, `Ctrl+Shift+H` opens highlights, and `Escape` returns to the document.
-                </p>
-                <details className="reader-shortcuts-details">
-                  <summary
-                    ref={(element) => {
-                      shortcutsSummaryRef.current = element;
-                    }}
-                    id={shortcutsReferenceId}
-                    className="reader-shortcuts-summary"
-                  >
-                    Show full Reader shortcut help
-                  </summary>
-                  <div className="reader-shortcuts-reference" aria-labelledby={shortcutsReferenceId}>
-                    {groupedAppShortcuts.map((shortcutGroup) => (
-                      <div key={shortcutGroup.groupLabel} className="reader-shortcuts-group">
-                        <p className="reader-shortcuts-group-label">{shortcutGroup.groupLabel}</p>
-                        <ul className="simple-list reader-shortcuts-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
-                          {shortcutGroup.shortcuts.map((shortcut) => (
-                            <li key={shortcut.action}>
-                              <strong>{shortcut.keys}</strong>: {shortcut.description}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                    {groupedReaderShortcuts.map((shortcutGroup) => (
-                      <div key={shortcutGroup.groupLabel} className="reader-shortcuts-group">
-                        <p className="reader-shortcuts-group-label">{shortcutGroup.groupLabel}</p>
-                        <ul className="simple-list reader-shortcuts-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
-                          {shortcutGroup.shortcuts.map((shortcut) => (
-                            <li key={shortcut.action}>
-                              <strong>{shortcut.keys}</strong>: {shortcut.description}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                    <p className="hint reader-shortcuts-note">
-                      Reader shortcuts stay inactive while you type in Reader controls, except `Escape`, which returns
-                      focus to the document text.
-                    </p>
-                    <p className="hint reader-shortcuts-note">
-                      Full shortcut reference also stays available in `Settings`.
-                    </p>
-                  </div>
-                </details>
-              </div>
-              <p className="hint reader-shortcuts-note">
-                Voice commands stay optional and experimental. They never replace keyboard shortcuts for reliable Reader
-                control.
-              </p>
-              <details className="reader-shortcuts-details reader-voice-commands-details">
-                <summary className="reader-shortcuts-summary">Show supported voice commands</summary>
-                <div className="reader-shortcuts-reference" aria-label="Supported voice commands">
-                  <p className="hint reader-shortcuts-note">
-                    Voice commands work only after you press `Listen for one command`, and they only respond to exact
-                    English phrases.
-                  </p>
-                  <ul className="simple-list reader-voice-command-list" aria-label="Supported Reader voice commands">
-                    {readerVoiceCommandLabels.map((commandLabel) => (
-                      <li key={commandLabel}>
-                        <strong>{commandLabel}</strong>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </details>
             </div>
           </section>
 
@@ -2879,7 +2995,12 @@ function ReaderScreen(props: {
             </div>
 
             <div className="reader-suite-sections">
-              <section className="reader-search-panel reader-suite-section" aria-labelledby={searchLabelId}>
+              <section
+                ref={searchSectionRef}
+                className="reader-search-panel reader-suite-section"
+                data-reader-region="search"
+                aria-labelledby={searchLabelId}
+              >
                 <div className="reader-tool-header">
                   <div>
                     <p className="reader-toolbar-label">Search</p>
@@ -2889,14 +3010,15 @@ function ReaderScreen(props: {
                 <form className="reader-search-form" onSubmit={handleSearchSubmit}>
                   <label className="field reader-search-field" htmlFor={searchInputId}>
                     <span id={searchLabelId}>Search this document</span>
-                  <input
-                    ref={searchInputRef}
-                    id={searchInputId}
-                    name="documentSearch"
-                    type="search"
-                    value={searchInputValue}
-                    onChange={(event) => setSearchInputValue(event.target.value)}
-                      placeholder="Find text in this file"
+                    <input
+                      ref={searchInputRef}
+                      id={searchInputId}
+                      name="documentSearch"
+                      type="search"
+                      value={searchInputValue}
+                      onChange={(event) => setSearchInputValue(event.target.value)}
+                      placeholder="Find text in this file..."
+                      autoComplete="off"
                       disabled={!hasText || props.documentState.isLoading}
                       aria-describedby={searchStatusId}
                     />
@@ -2932,12 +3054,13 @@ function ReaderScreen(props: {
                 >
                   {searchStatusMessage}
                 </p>
-                <p className="hint">Press `Escape` from the search field to return to the document text.</p>
+                <p className="hint">Press `Escape` or `Ctrl+1` from the search field to return to the document text.</p>
               </section>
 
               <section
                 ref={highlightSectionRef}
                 className="reader-highlights reader-suite-section"
+                data-reader-region="highlights"
                 aria-labelledby="reader-highlights-title"
                 tabIndex={-1}
               >
@@ -2978,14 +3101,15 @@ function ReaderScreen(props: {
                     value={highlightNoteInputValue}
                     onChange={(event) => setHighlightNoteInputValue(event.target.value)}
                     maxLength={MAX_HIGHLIGHT_NOTE_LENGTH}
-                    placeholder="Optional note"
+                    placeholder="Optional note..."
+                    autoComplete="off"
                     disabled={!hasText || (!selectedTextRange && !activeHighlight)}
                     aria-describedby={highlightNoteHintId}
                   />
                 </label>
                 <p id={highlightNoteHintId} className="hint">
                   Keep highlight notes short. Select text to save a new one, or open a saved highlight to edit it.
-                  Press `Escape` to return to the document text.
+                  Press `Escape` or `Ctrl+1` to return to the document text.
                 </p>
                 {props.highlights.length > 0 ? (
                   <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
@@ -3037,6 +3161,7 @@ function ReaderScreen(props: {
               <section
                 ref={bookmarkSectionRef}
                 className="reader-bookmarks reader-suite-section"
+                data-reader-region="bookmarks"
                 aria-labelledby="reader-bookmarks-title"
                 tabIndex={-1}
               >
@@ -3065,14 +3190,15 @@ function ReaderScreen(props: {
                     value={bookmarkNoteInputValue}
                     onChange={(event) => setBookmarkNoteInputValue(event.target.value)}
                     maxLength={MAX_BOOKMARK_NOTE_LENGTH}
-                    placeholder="Optional study note"
+                    placeholder="Optional study note..."
+                    autoComplete="off"
                     disabled={!hasText || !props.documentState.filePath}
                     aria-describedby={bookmarkNoteHintId}
                   />
                 </label>
                 <p id={bookmarkNoteHintId} className="hint">
                   {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note. Press `Escape`
-                  to return to the document text.
+                  or `Ctrl+1` to return to the document text.
                 </p>
                 {props.bookmarks.length > 0 ? (
                   <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
@@ -3100,13 +3226,104 @@ function ReaderScreen(props: {
               </section>
             </div>
           </section>
-        </div>
+
+          <section
+            ref={helpSectionRef}
+            className="reader-tool-suite reader-help-panel"
+            data-reader-region="help"
+            aria-labelledby={helpRegionTitleId}
+            aria-describedby={`${helpRegionHintId} ${shortcutsHintId}`}
+          >
+            <div className="reader-tool-suite-header">
+              <div>
+                <p className="reader-toolbar-label">Help</p>
+                <h3 id={helpRegionTitleId}>Shortcuts and navigation help</h3>
+              </div>
+              <p id={helpRegionHintId}>
+                Screen readers and keyboard landmarks are the reliable Reader path. Voice support stays secondary here.
+              </p>
+            </div>
+
+            <div id={shortcutsHintId} className="reader-shortcuts-compact">
+              <p className="hint reader-shortcuts-note">
+                Landmarks: `Ctrl+1` document, `Ctrl+2` playback, `Ctrl+3` search, `Ctrl+4` highlights, `Ctrl+5`
+                bookmarks, `Ctrl+6` help. Core reading keys remain `Space`, `J`, `K`, `R`, `F3`, `B`, `H`, and
+                `Escape`.
+              </p>
+              <details className="reader-shortcuts-details">
+                <summary
+                  ref={(element) => {
+                    shortcutsSummaryRef.current = element;
+                  }}
+                  id={shortcutsReferenceId}
+                  className="reader-shortcuts-summary"
+                >
+                  Show full Reader shortcut help
+                </summary>
+                <div className="reader-shortcuts-reference" aria-labelledby={shortcutsReferenceId}>
+                  {groupedAppShortcuts.map((shortcutGroup) => (
+                    <div key={shortcutGroup.groupLabel} className="reader-shortcuts-group">
+                      <p className="reader-shortcuts-group-label">{shortcutGroup.groupLabel}</p>
+                      <ul className="simple-list reader-shortcuts-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
+                        {shortcutGroup.shortcuts.map((shortcut) => (
+                          <li key={shortcut.action}>
+                            <strong>{shortcut.keys}</strong>: {shortcut.description}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                  {groupedReaderShortcuts.map((shortcutGroup) => (
+                    <div key={shortcutGroup.groupLabel} className="reader-shortcuts-group">
+                      <p className="reader-shortcuts-group-label">{shortcutGroup.groupLabel}</p>
+                      <ul className="simple-list reader-shortcuts-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
+                        {shortcutGroup.shortcuts.map((shortcut) => (
+                          <li key={shortcut.action}>
+                            <strong>{shortcut.keys}</strong>: {shortcut.description}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                  <p className="hint reader-shortcuts-note">
+                    Reader shortcuts stay inactive while you type in Reader controls, except `Escape`, which returns
+                    focus to the document text.
+                  </p>
+                  <p className="hint reader-shortcuts-note">
+                    Full shortcut reference also stays available in `Settings`.
+                  </p>
+                </div>
+              </details>
+              <p className="hint reader-shortcuts-note">
+                Voice commands stay optional and experimental. They never replace keyboard shortcuts for reliable Reader
+                control.
+              </p>
+              <details className="reader-shortcuts-details reader-voice-commands-details">
+                <summary className="reader-shortcuts-summary">Show supported voice commands</summary>
+                <div className="reader-shortcuts-reference" aria-label="Supported voice commands">
+                  <p className="hint reader-shortcuts-note">
+                    Voice commands work only after you press `Listen for one command`, and they only respond to exact
+                    English phrases.
+                  </p>
+                  <ul className="simple-list reader-voice-command-list" aria-label="Supported Reader voice commands">
+                    {readerVoiceCommandLabels.map((commandLabel) => (
+                      <li key={commandLabel}>
+                        <strong>{commandLabel}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            </div>
+          </section>
+        </aside>
       </div>
 
       <section
         ref={readerPanelRef}
         className="reader-panel reader-panel-expanded"
         tabIndex={-1}
+        data-reader-region="document"
         role="region"
         aria-labelledby={documentRegionTitleId}
         aria-describedby={`${documentRegionHintId} ${positionStatusId}`}
@@ -3140,11 +3357,28 @@ function ReaderScreen(props: {
                   .join(" ")}
                 role="listitem"
                 tabIndex={-1}
+                aria-labelledby={`reader-paragraph-label-${index}`}
                 aria-current={index === props.currentParagraphIndex ? "true" : undefined}
-                aria-label={`Paragraph ${index + 1}`}
+                onFocusCapture={() => {
+                  if (props.currentParagraphIndex !== index) {
+                    props.onCurrentParagraphIndexChange(index);
+                  }
+                }}
               >
-                <span className="reader-paragraph-meta">Paragraph {index + 1}</span>
-                <p className="reader-paragraph-body" data-reader-paragraph-body="true" data-paragraph-index={index}>
+                <span id={`reader-paragraph-label-${index}`} className="reader-paragraph-meta">
+                  Paragraph {index + 1}
+                </span>
+                <p
+                  id={`reader-paragraph-body-${index}`}
+                  ref={(element) => {
+                    paragraphBodyRefs.current[index] = element;
+                  }}
+                  className="reader-paragraph-body"
+                  tabIndex={-1}
+                  aria-describedby={`reader-paragraph-label-${index}`}
+                  data-reader-paragraph-body="true"
+                  data-paragraph-index={index}
+                >
                   {renderParagraphText(paragraph, index)}
                 </p>
                 {selectedTextRange && selectedTextRange.paragraphIndex === index ? (
@@ -3189,8 +3423,8 @@ function ReaderScreen(props: {
             <p className="empty-state">Open a readable `.txt` or `.pdf` document to begin.</p>
             <p className="hint">Use `Open file` above or press `Ctrl+O`.</p>
             <p className="hint reader-empty-shortcuts">
-              Reader shortcuts center on a small map: `Space`, `S`, `J`, `K`, `R`, `Ctrl+F`, `Ctrl+Shift+B`,
-              `Ctrl+Shift+H`, `F3`, `M`, `B`, `H`, `Escape`, and `Alt+Up` or `Alt+Down`.
+              Reader shortcuts center on a small map: `Ctrl+1` through `Ctrl+6`, `Space`, `S`, `J`, `K`, `R`,
+              `Ctrl+F`, `F3`, `M`, `B`, `H`, `Escape`, and `Alt+Up` or `Alt+Down`.
             </p>
           </div>
         )}

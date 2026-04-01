@@ -8,6 +8,7 @@ export type ReaderShortcutAction =
   | "repeatCurrentParagraph"
   | "increaseSpeed"
   | "decreaseSpeed"
+  | "focusPlayback"
   | "focusSearch"
   | "nextSearchMatch"
   | "previousSearchMatch"
@@ -18,6 +19,7 @@ export type ReaderShortcutAction =
   | "focusHighlights"
   | "nextHighlight"
   | "previousHighlight"
+  | "focusHelp"
   | "focusReaderText";
 
 export type ShortcutScope = "global" | "reader";
@@ -125,10 +127,50 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
     typingBehavior: "ignoreWhileTyping"
   },
   {
+    action: "focusReaderText",
+    keys: "Escape or Ctrl+1",
+    description: "Return focus to the document text region.",
+    groupLabel: "Landmarks",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "focusPlayback",
+    keys: "Ctrl+2",
+    description: "Jump to the playback controls.",
+    groupLabel: "Landmarks",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
     action: "focusSearch",
-    keys: "Ctrl+F or /",
+    keys: "Ctrl+F, /, or Ctrl+3",
     description: "Focus the Reader search box.",
-    groupLabel: "Find and markers",
+    groupLabel: "Landmarks",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "focusHighlights",
+    keys: "Ctrl+Shift+H or Ctrl+4",
+    description: "Focus the highlights tool for the current document.",
+    groupLabel: "Landmarks",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "focusBookmarks",
+    keys: "Ctrl+Shift+B or Ctrl+5",
+    description: "Focus the bookmarks tool for the current document.",
+    groupLabel: "Landmarks",
+    scope: "reader",
+    typingBehavior: "ignoreWhileTyping"
+  },
+  {
+    action: "focusHelp",
+    keys: "Ctrl+6",
+    description: "Focus Reader shortcut and navigation help.",
+    groupLabel: "Landmarks",
     scope: "reader",
     typingBehavior: "ignoreWhileTyping"
   },
@@ -157,14 +199,6 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
     typingBehavior: "ignoreWhileTyping"
   },
   {
-    action: "focusBookmarks",
-    keys: "Ctrl+Shift+B",
-    description: "Focus the bookmarks tool for the current document.",
-    groupLabel: "Find and markers",
-    scope: "reader",
-    typingBehavior: "ignoreWhileTyping"
-  },
-  {
     action: "nextBookmark",
     keys: "B",
     description: "Jump to the next saved bookmark.",
@@ -181,14 +215,6 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
     typingBehavior: "ignoreWhileTyping"
   },
   {
-    action: "focusHighlights",
-    keys: "Ctrl+Shift+H",
-    description: "Focus the highlights tool for the current document.",
-    groupLabel: "Find and markers",
-    scope: "reader",
-    typingBehavior: "ignoreWhileTyping"
-  },
-  {
     action: "nextHighlight",
     keys: "H",
     description: "Jump to the next saved highlight.",
@@ -200,14 +226,6 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
     action: "previousHighlight",
     keys: "Shift+H",
     description: "Jump to the previous saved highlight.",
-    groupLabel: "Find and markers",
-    scope: "reader",
-    typingBehavior: "ignoreWhileTyping"
-  },
-  {
-    action: "focusReaderText",
-    keys: "Escape",
-    description: "Return focus to the document text region.",
     groupLabel: "Find and markers",
     scope: "reader",
     typingBehavior: "ignoreWhileTyping"
@@ -446,6 +464,32 @@ export function getReaderShortcutAction(input: ReaderShortcutInput): ReaderShort
 
   if (getAppShortcutAction(input)) {
     return null;
+  }
+
+  if (input.ctrlKey && !input.metaKey && !input.altKey && !input.shiftKey) {
+    if (normalizedKey === "1") {
+      return "focusReaderText";
+    }
+
+    if (normalizedKey === "2") {
+      return "focusPlayback";
+    }
+
+    if (normalizedKey === "3") {
+      return "focusSearch";
+    }
+
+    if (normalizedKey === "4") {
+      return "focusHighlights";
+    }
+
+    if (normalizedKey === "5") {
+      return "focusBookmarks";
+    }
+
+    if (normalizedKey === "6") {
+      return "focusHelp";
+    }
   }
 
   if (input.ctrlKey && !input.metaKey && !input.altKey && !input.shiftKey && normalizedKey === "f") {
