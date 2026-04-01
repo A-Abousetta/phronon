@@ -95,6 +95,7 @@ import {
   buildReaderStudyContextMessage,
   buildReaderStudyOverviewMessage
 } from "./readerNavigation";
+import { readerRailSectionOrder, type ReaderRailSectionId } from "./readerLayout";
 import phrononMasterArtwork from "./assets/images/phronon-master-1024.png";
 import keyboardModeArtwork from "./assets/images/Keyboard mode.png";
 import listeningModeArtwork from "./assets/images/Listening mode.png";
@@ -849,14 +850,14 @@ function ReaderScreen(props: {
 }) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
   const [playbackMessage, setPlaybackMessage] = useState("Load a .txt or .pdf file to start playback.");
-  const [bookmarkMessage, setBookmarkMessage] = useState("No bookmarks saved for this document yet.");
+  const [bookmarkMessage, setBookmarkMessage] = useState("No markers yet.");
   const [voiceCommandMessage, setVoiceCommandMessage] = useState("");
   const [voiceCommandPhase, setVoiceCommandPhase] = useState<VoiceCommandPhase>("idle");
   const [searchInputValue, setSearchInputValue] = useState("");
   const [activeSearchQuery, setActiveSearchQuery] = useState("");
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
   const [bookmarkNoteInputValue, setBookmarkNoteInputValue] = useState("");
-  const [highlightMessage, setHighlightMessage] = useState("No highlights saved for this document yet.");
+  const [highlightMessage, setHighlightMessage] = useState("No highlights yet.");
   const [highlightNoteInputValue, setHighlightNoteInputValue] = useState("");
   const [selectedTextRange, setSelectedTextRange] = useState<ReaderTextSelection | null>(null);
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
@@ -2350,8 +2351,8 @@ function ReaderScreen(props: {
 
   function jumpToBookmarkByShortcut(direction: "previous" | "next") {
     if (props.bookmarks.length === 0) {
-      setBookmarkMessage("No bookmarks are saved for this document yet.");
-      props.onAnnounce("No bookmarks are saved for this document yet.");
+      setBookmarkMessage("No markers yet.");
+      props.onAnnounce("No markers are saved yet.");
       return;
     }
 
@@ -2613,9 +2614,6 @@ function ReaderScreen(props: {
   const fileTypeLabel = props.documentState.fileType === "pdf" ? "PDF" : props.documentState.fileType === "txt" ? "TXT" : "No file";
   const currentParagraphId =
     paragraphs.length > 0 ? `reader-paragraph-${props.currentParagraphIndex}` : undefined;
-  const currentParagraphPreview = paragraphs[props.currentParagraphIndex]
-    ? buildBookmarkPreviewText(paragraphs[props.currentParagraphIndex], 72)
-    : null;
   const currentBookmark = bookmarksByParagraph.get(props.currentParagraphIndex) ?? null;
   const currentParagraphHighlightCount = highlightsByParagraph.get(props.currentParagraphIndex)?.length ?? 0;
   const activeHighlight = props.highlights.find((highlight) => highlight.id === activeHighlightId) ?? null;
@@ -2642,6 +2640,7 @@ function ReaderScreen(props: {
     activeHighlightParagraphIndex: activeHighlight?.paragraphIndex ?? null,
     activeHighlightPreview: activeHighlight ? buildBookmarkPreviewText(activeHighlight.selectedText, 68) : null
   });
+  const selectedParagraphIndex = selectedTextRange?.paragraphIndex ?? null;
   const studyOverviewMessage = buildReaderStudyOverviewMessage({
     hasText,
     searchQuery: activeSearchQuery,
@@ -2663,7 +2662,6 @@ function ReaderScreen(props: {
     currentParagraphHasBookmark: Boolean(currentBookmark),
     currentParagraphHighlightCount
   });
-  const selectedParagraphIndex = selectedTextRange?.paragraphIndex ?? null;
   const activeSavedStudyPointIndex = activeHighlightId
     ? savedStudyPoints.findIndex((point) => point.kind === "highlight" && point.id === activeHighlightId)
     : savedStudyPoints.findIndex((point) => point.paragraphIndex === props.currentParagraphIndex);
@@ -2677,23 +2675,88 @@ function ReaderScreen(props: {
     activeSavedPointParagraphIndex: activeSavedStudyPoint?.paragraphIndex ?? null,
     activeSavedPointHasNote: Boolean(activeSavedStudyPoint?.note)
   });
-  const searchSectionMeta = !hasText
-    ? "Search will be ready when a file is loaded."
-    : !activeSearchQuery
-      ? "No active query yet."
-      : searchMatches.length === 0
-        ? `No matches for "${activeSearchQuery}".`
-        : searchSavedPointCount > 0
-          ? `${searchSavedPointCount} saved study point${searchSavedPointCount === 1 ? "" : "s"} already sit in these results.`
-          : `${searchMatches.length} match${searchMatches.length === 1 ? "" : "es"} across ${searchMatchesByParagraph.size} paragraph${searchMatchesByParagraph.size === 1 ? "" : "s"}.`;
-  const highlightSectionMeta =
-    props.highlights.length === 0
-      ? "No saved highlights yet."
-      : `${props.highlights.length} saved highlight${props.highlights.length === 1 ? "" : "s"} across ${highlightsByParagraph.size} paragraph${highlightsByParagraph.size === 1 ? "" : "s"}${currentParagraphHighlightCount > 0 ? `. Current paragraph has ${currentParagraphHighlightCount} highlight${currentParagraphHighlightCount === 1 ? "" : "s"}.` : "."}`;
-  const bookmarkSectionMeta =
-    props.bookmarks.length === 0
-      ? "No saved markers yet."
-      : `${props.bookmarks.length} saved marker${props.bookmarks.length === 1 ? "" : "s"}${currentBookmark ? ". Current paragraph is marked." : "."}`;
+  const studyTrailChips = useMemo(() => {
+    const chips = [
+      `${savedStudyPoints.length} study point${savedStudyPoints.length === 1 ? "" : "s"}`,
+      `${props.highlights.length} highlight${props.highlights.length === 1 ? "" : "s"}`,
+      `${props.bookmarks.length} marker${props.bookmarks.length === 1 ? "" : "s"}`
+    ];
+
+    if (!hasText) {
+      chips.push("Open a file");
+      return chips;
+    }
+
+    chips.unshift(
+      activeSearchQuery
+        ? `${searchMatches.length} match${searchMatches.length === 1 ? "" : "es"}`
+        : "Search ready"
+    );
+
+    return chips;
+  }, [activeSearchQuery, hasText, props.bookmarks.length, props.highlights.length, savedStudyPoints.length, searchMatches.length]);
+  const searchSectionChips = useMemo(() => {
+    if (!hasText) {
+      return ["Waiting for file"];
+    }
+
+    if (!activeSearchQuery) {
+      return ["Ready to search"];
+    }
+
+    if (searchMatches.length === 0) {
+      return ["No matches"];
+    }
+
+    const chips = [
+      `${searchMatches.length} match${searchMatches.length === 1 ? "" : "es"}`,
+      `${searchMatchesByParagraph.size} paragraph${searchMatchesByParagraph.size === 1 ? "" : "s"}`
+    ];
+
+    if (searchSavedPointCount > 0) {
+      chips.push(`${searchSavedPointCount} on trail`);
+    }
+
+    return chips;
+  }, [activeSearchQuery, hasText, searchMatches.length, searchMatchesByParagraph.size, searchSavedPointCount]);
+  const highlightSectionChips = useMemo(() => {
+    if (!hasText) {
+      return ["Waiting for file"];
+    }
+
+    const chips = [`${props.highlights.length} saved`];
+
+    if (selectedParagraphIndex !== null) {
+      chips.push(`Selection p${selectedParagraphIndex + 1}`);
+      return chips;
+    }
+
+    if (activeHighlight) {
+      chips.push(`Editing p${activeHighlight.paragraphIndex + 1}`);
+      return chips;
+    }
+
+    if (currentParagraphHighlightCount > 0) {
+      chips.push(`${currentParagraphHighlightCount} here`);
+    }
+
+    return chips;
+  }, [activeHighlight, currentParagraphHighlightCount, hasText, props.highlights.length, selectedParagraphIndex]);
+  const bookmarkSectionChips = useMemo(() => {
+    if (!hasText) {
+      return ["Waiting for file"];
+    }
+
+    const chips = [`${props.bookmarks.length} saved`];
+
+    if (currentBookmark) {
+      chips.push("Current marked");
+      return chips;
+    }
+
+    chips.push(`Paragraph ${props.currentParagraphIndex + 1}`);
+    return chips;
+  }, [currentBookmark, hasText, props.bookmarks.length, props.currentParagraphIndex]);
   const readerLandmarkStatusMessage = buildReaderRegionStatusMessage({
     activeRegion: activeReaderRegion,
     activeRegionLabel: activeReaderRegionLabel,
@@ -2709,16 +2772,16 @@ function ReaderScreen(props: {
   useEffect(() => {
     setBookmarkMessage(
       props.bookmarks.length > 0
-        ? `${props.bookmarks.length} bookmark${props.bookmarks.length === 1 ? "" : "s"} saved for this document.`
-        : "No bookmarks saved for this document yet."
+        ? `${props.bookmarks.length} marker${props.bookmarks.length === 1 ? "" : "s"} saved.`
+        : "No markers yet."
     );
   }, [props.bookmarks.length, props.documentState.filePath]);
 
   useEffect(() => {
     setHighlightMessage(
       props.highlights.length > 0
-        ? `${props.highlights.length} highlight${props.highlights.length === 1 ? "" : "s"} saved for this document.`
-        : "No highlights saved for this document yet."
+        ? `${props.highlights.length} highlight${props.highlights.length === 1 ? "" : "s"} saved.`
+        : "No highlights yet."
     );
   }, [props.highlights.length, props.documentState.filePath]);
 
@@ -2755,8 +2818,8 @@ function ReaderScreen(props: {
     setBookmarkNoteInputValue(normalizedNote);
     setBookmarkMessage(
       normalizedNote
-        ? `Saved bookmark and note for paragraph ${props.currentParagraphIndex + 1}.`
-        : `Saved bookmark for paragraph ${props.currentParagraphIndex + 1}.`
+        ? `Saved marker and note for paragraph ${props.currentParagraphIndex + 1}.`
+        : `Saved marker for paragraph ${props.currentParagraphIndex + 1}.`
     );
     props.onAnnounce(
       normalizedNote
@@ -2903,6 +2966,601 @@ function ReaderScreen(props: {
     );
   }
 
+  const readerRailSections: Record<ReaderRailSectionId, ReactNode> = {
+    study: (
+      <section
+        key="study"
+        className="reader-tool-suite"
+        aria-labelledby={toolSuiteTitleId}
+        aria-describedby={toolSuiteDescriptionId}
+      >
+        <div className="reader-tool-suite-header">
+          <div>
+            <p className="reader-toolbar-label">Study tools</p>
+            <h3 id={toolSuiteTitleId}>Find, save, and revisit</h3>
+          </div>
+          <p id={toolSuiteDescriptionId}>Search, save, and revisit one connected study trail.</p>
+        </div>
+
+        <div className="reader-study-overview" aria-describedby={studyReviewStatusId}>
+          <div className="reader-study-overview-main">
+            <div className="reader-study-overview-copy">
+              <p className="reader-toolbar-label">Study trail</p>
+              <p className="reader-study-overview-message">{studyOverviewMessage}</p>
+              <p className="reader-study-overview-context">{studyContextMessage}</p>
+            </div>
+            <div className="reader-study-chip-row" aria-label="Study trail summary">
+              {studyTrailChips.map((chip) => (
+                <span key={chip} className="reader-chip reader-chip-subtle">
+                  {chip}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="reader-study-review-bar">
+            <div className="reader-study-review-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => handleSavedStudyPointStep("previous")}
+                disabled={savedStudyPoints.length === 0}
+                aria-describedby={studyReviewStatusId}
+              >
+                Previous saved
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => handleSavedStudyPointStep("next")}
+                disabled={savedStudyPoints.length === 0}
+                aria-describedby={studyReviewStatusId}
+              >
+                Next saved
+              </button>
+            </div>
+            <p
+              id={studyReviewStatusId}
+              className="status-message compact-status reader-tool-status reader-study-review-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {savedReviewStatusMessage}
+            </p>
+          </div>
+        </div>
+
+        <div className="reader-suite-sections">
+          <section
+            ref={searchSectionRef}
+            className="reader-search-panel reader-suite-section"
+            data-reader-region="search"
+            aria-labelledby={searchLabelId}
+          >
+            <div className="reader-tool-header">
+              <div className="reader-tool-heading">
+                <p className="reader-toolbar-label">Search</p>
+                <h3>Find inside this document</h3>
+              </div>
+              <div className="reader-section-chip-row" aria-label="Search summary">
+                {searchSectionChips.map((chip) => (
+                  <span key={chip} className="reader-chip reader-chip-subtle">
+                    {chip}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <form className="reader-search-form" onSubmit={handleSearchSubmit}>
+              <label className="field reader-search-field" htmlFor={searchInputId}>
+                <span id={searchLabelId}>Search this document</span>
+                <input
+                  ref={searchInputRef}
+                  id={searchInputId}
+                  name="documentSearch"
+                  type="search"
+                  value={searchInputValue}
+                  onChange={(event) => setSearchInputValue(event.target.value)}
+                  placeholder="Find text in this file…"
+                  autoComplete="off"
+                  disabled={!hasText || props.documentState.isLoading}
+                  aria-describedby={searchStatusId}
+                />
+              </label>
+              <div className="reader-search-actions">
+                <button type="submit" disabled={!hasText || props.documentState.isLoading}>
+                  Search
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSearchStep("previous")}
+                  disabled={searchMatches.length === 0}
+                  aria-controls={currentParagraphId}
+                >
+                  Previous match
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSearchStep("next")}
+                  disabled={searchMatches.length === 0}
+                  aria-controls={currentParagraphId}
+                >
+                  Next match
+                </button>
+              </div>
+            </form>
+            <p
+              id={searchStatusId}
+              className="status-message compact-status reader-tool-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {searchStatusMessage}
+            </p>
+            <p className="hint reader-return-hint">{returnToDocumentHint}</p>
+          </section>
+
+          <section
+            ref={highlightSectionRef}
+            className="reader-highlights reader-suite-section"
+            data-reader-region="highlights"
+            aria-labelledby="reader-highlights-title"
+            tabIndex={-1}
+          >
+            <div className="reader-bookmarks-header">
+              <div className="reader-tool-heading">
+                <p className="reader-toolbar-label">Highlights</p>
+                <h3 id="reader-highlights-title">Saved passages</h3>
+              </div>
+              <div className="reader-section-chip-row" aria-label="Highlight summary">
+                {highlightSectionChips.map((chip) => (
+                  <span key={chip} className="reader-chip reader-chip-subtle">
+                    {chip}
+                  </span>
+                ))}
+              </div>
+              <div className="reader-highlight-actions">
+                <button
+                  ref={highlightSaveButtonRef}
+                  type="button"
+                  onClick={handleSaveHighlight}
+                  disabled={!hasText || !props.documentState.filePath || !selectedTextRange}
+                >
+                  {highlightActionLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemoveHighlight}
+                  disabled={!activeHighlight && !selectedExistingHighlight}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+            <p
+              id={highlightStatusId}
+              className="status-message compact-status reader-tool-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {highlightMessage}
+            </p>
+            <label className="field bookmark-note-field" htmlFor={highlightNoteInputId}>
+              <span>Note for this highlight</span>
+              <input
+                ref={highlightNoteInputRef}
+                id={highlightNoteInputId}
+                name="highlightNote"
+                type="text"
+                value={highlightNoteInputValue}
+                onChange={(event) => setHighlightNoteInputValue(event.target.value)}
+                maxLength={MAX_HIGHLIGHT_NOTE_LENGTH}
+                placeholder="Optional note…"
+                autoComplete="off"
+                disabled={!hasText || (!selectedTextRange && !activeHighlight)}
+                aria-describedby={highlightNoteHintId}
+              />
+            </label>
+            <p id={highlightNoteHintId} className="hint">
+              {highlightStatusText}
+            </p>
+            {props.highlights.length > 0 ? (
+              <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
+                {props.highlights.map((highlight, highlightIndex) => {
+                  const isCurrentParagraph = highlight.paragraphIndex === props.currentParagraphIndex;
+                  const isSearchResult = searchMatchesByParagraph.has(highlight.paragraphIndex);
+
+                  return (
+                    <li key={highlight.id} className="bookmark-list-item highlight-list-item">
+                      <div
+                        className={
+                          highlight.id === activeHighlightId ? "bookmark-button highlight-card highlight-card-active" : "bookmark-button highlight-card"
+                        }
+                      >
+                        <button
+                          ref={(element) => {
+                            highlightOpenButtonRefs.current[highlightIndex] = element;
+                          }}
+                          type="button"
+                          className="highlight-card-open"
+                          onClick={() => handleJumpToHighlight(highlight, highlightIndex)}
+                          aria-controls={`reader-paragraph-${highlight.paragraphIndex}`}
+                        >
+                          <span className="reader-saved-point-topline">
+                            <span className="bookmark-button-title">Paragraph {highlight.paragraphIndex + 1}</span>
+                            {isCurrentParagraph || isSearchResult ? (
+                              <span className="bookmark-button-tags" aria-hidden="true">
+                                {isCurrentParagraph ? <span className="bookmark-button-tag">Current</span> : null}
+                                {isSearchResult ? <span className="bookmark-button-tag">Search</span> : null}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="bookmark-button-preview">{highlight.previewText}</span>
+                          {highlight.note ? <span className="bookmark-button-note">Note: {highlight.note}</span> : null}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button highlight-card-remove"
+                          onClick={() => {
+                            setActiveHighlightId(highlight.id);
+                            setHighlightNoteInputValue(highlight.note);
+                            props.onRemoveHighlight(highlight.id);
+                            setActiveHighlightId(null);
+                            setSelectedTextRange(null);
+                            clearBrowserSelection();
+                            setHighlightMessage(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
+                            props.onAnnounce(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="hint reader-empty-inline">No highlights yet.</p>
+            )}
+          </section>
+
+          <section
+            ref={bookmarkSectionRef}
+            className="reader-bookmarks reader-suite-section"
+            data-reader-region="bookmarks"
+            aria-labelledby="reader-bookmarks-title"
+            tabIndex={-1}
+          >
+            <div className="reader-bookmarks-header">
+              <div className="reader-tool-heading">
+                <p className="reader-toolbar-label">Bookmarks</p>
+                <h3 id="reader-bookmarks-title">Saved markers</h3>
+              </div>
+              <div className="reader-section-chip-row" aria-label="Bookmark summary">
+                {bookmarkSectionChips.map((chip) => (
+                  <span key={chip} className="reader-chip reader-chip-subtle">
+                    {chip}
+                  </span>
+                ))}
+              </div>
+              <button type="button" onClick={handleAddBookmark} disabled={!hasText || !props.documentState.filePath}>
+                {bookmarkActionLabel}
+              </button>
+            </div>
+            <p
+              className="status-message compact-status reader-tool-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {bookmarkMessage}
+            </p>
+            <label className="field bookmark-note-field" htmlFor={bookmarkNoteInputId}>
+              <span>Note for the current paragraph</span>
+              <input
+                ref={bookmarkNoteInputRef}
+                id={bookmarkNoteInputId}
+                name="bookmarkNote"
+                type="text"
+                value={bookmarkNoteInputValue}
+                onChange={(event) => setBookmarkNoteInputValue(event.target.value)}
+                maxLength={MAX_BOOKMARK_NOTE_LENGTH}
+                placeholder="Optional study note…"
+                autoComplete="off"
+                disabled={!hasText || !props.documentState.filePath}
+                aria-describedby={bookmarkNoteHintId}
+              />
+            </label>
+            <p id={bookmarkNoteHintId} className="hint">
+              {bookmarkNoteStatus} Save again after editing.
+            </p>
+            {props.bookmarks.length > 0 ? (
+              <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
+                {props.bookmarks.map((bookmark, bookmarkIndex) => {
+                  const isCurrentParagraph = bookmark.paragraphIndex === props.currentParagraphIndex;
+                  const isSearchResult = searchMatchesByParagraph.has(bookmark.paragraphIndex);
+
+                  return (
+                    <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
+                      <button
+                        ref={(element) => {
+                          bookmarkButtonRefs.current[bookmarkIndex] = element;
+                        }}
+                        type="button"
+                        className="bookmark-button"
+                        onClick={() => handleJumpToBookmark(bookmark, bookmarkIndex)}
+                        aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
+                      >
+                        <span className="reader-saved-point-topline">
+                          <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
+                          {isCurrentParagraph || isSearchResult ? (
+                            <span className="bookmark-button-tags" aria-hidden="true">
+                              {isCurrentParagraph ? <span className="bookmark-button-tag">Current</span> : null}
+                              {isSearchResult ? <span className="bookmark-button-tag">Search</span> : null}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="bookmark-button-preview">{bookmark.previewText}</span>
+                        {bookmark.note ? <span className="bookmark-button-note">Note: {bookmark.note}</span> : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="hint reader-empty-inline">No markers yet.</p>
+            )}
+          </section>
+        </div>
+      </section>
+    ),
+    playback: (
+      <section
+        key="playback"
+        ref={playbackSectionRef}
+        className="reader-playback-bar"
+        data-reader-region="playback"
+        aria-labelledby={playbackRegionTitleId}
+        aria-describedby={playbackRegionHintId}
+      >
+        <div className="reader-tool-header">
+          <div>
+            <p className="reader-toolbar-label">Playback</p>
+            <h3 id={playbackRegionTitleId}>Reading controls</h3>
+          </div>
+        </div>
+        <p id={playbackRegionHintId} className="hint">
+          {returnToDocumentHint}
+        </p>
+        <div className="playback-row" role="group" aria-label="Primary playback actions">
+          <div className="playback-group playback-group-primary">
+            <button
+              ref={playButtonRef}
+              className="playback-primary-button"
+              type="button"
+              onClick={handlePlay}
+              aria-describedby={statusId}
+            >
+              {playbackState === "paused" ? "Resume" : "Play"}
+            </button>
+            <button
+              type="button"
+              onClick={handlePause}
+              disabled={!speechSynthesisAvailable || playbackState !== "playing"}
+            >
+              Pause
+            </button>
+            <button
+              type="button"
+              onClick={handleStop}
+              disabled={!speechSynthesisAvailable || playbackState === "idle"}
+            >
+              Stop
+            </button>
+          </div>
+          <div className="playback-group" role="group" aria-label="Paragraph navigation">
+            <button
+              type="button"
+              onClick={() => moveToParagraph("previous")}
+              disabled={!hasText || props.currentParagraphIndex === 0}
+              aria-controls={currentParagraphId}
+            >
+              Previous paragraph
+            </button>
+            <button
+              type="button"
+              onClick={() => moveToParagraph("next")}
+              disabled={!hasText || props.currentParagraphIndex >= paragraphs.length - 1}
+              aria-controls={currentParagraphId}
+            >
+              Next paragraph
+            </button>
+            <button type="button" onClick={handleRepeatCurrentParagraph} disabled={!hasText}>
+              Repeat paragraph
+            </button>
+          </div>
+        </div>
+
+        <div className="playback-secondary-row">
+          <label className="field playback-speed" htmlFor={speedInputId}>
+            <span>Playback speed</span>
+            <input
+              id={speedInputId}
+              className="brand-slider"
+              type="range"
+              min="0.5"
+              max="2"
+              step="0.1"
+              value={props.playbackRate}
+              onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
+              aria-describedby={`${statusId} ${speedValueId}`}
+              aria-valuetext={`${props.playbackRate.toFixed(1)} times speed`}
+            />
+            <span id={speedValueId} className="hint playback-speed-value">
+              {props.playbackRate.toFixed(1)}x
+            </span>
+          </label>
+
+          <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
+            <div className="playback-voice-copy">
+              <button
+                ref={voiceCommandButtonRef}
+                type="button"
+                onClick={handleListenForVoiceCommand}
+                disabled={voiceCommandInteractionDisabled}
+                aria-pressed={isListeningForVoiceCommand}
+                aria-describedby={`${voiceCommandStatusId} ${voiceCommandSupportId}`}
+              >
+                {isListeningForVoiceCommand
+                  ? "Stop listening"
+                  : voiceCommandInteractionDisabled
+                    ? "Voice commands unavailable here"
+                    : "Listen for one command"}
+              </button>
+              <p id={voiceCommandStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                {voiceCommandMessage || voiceCommandIdleMessage}
+              </p>
+              <p id={voiceCommandSupportId} className="hint playback-voice-note">
+                {voiceCommandInteractionDisabled
+                  ? "Voice commands are currently downgraded on this device because this runtime did not keep listening reliably. Keyboard shortcuts and screen readers remain the reliable primary controls."
+                  : "Experimental. One exact English phrase per press. Keyboard shortcuts and screen readers remain the reliable primary controls."}
+              </p>
+            </div>
+            <div className="playback-illustration" aria-hidden="true">
+              <img
+                className="playback-illustration-image"
+                src={listeningModeArtwork}
+                alt=""
+                width={768}
+                height={768}
+                decoding="async"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="playback-readout">
+          <p
+            className={statusToneClass}
+            role={props.documentState.error || !speechSynthesisAvailable ? "alert" : "status"}
+            aria-live={props.documentState.error || !speechSynthesisAvailable ? "assertive" : "polite"}
+            aria-atomic="true"
+          >
+            <strong>Playback:</strong> {playbackStatusLabel}. {playbackMessage}
+          </p>
+          <p
+            id={positionStatusId}
+            className="status-message compact-status"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {paragraphs.length > 0
+              ? `Position: paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
+              : "Position: no document loaded."}
+          </p>
+          {voiceStatusMessage ? (
+            <p className="status-message error-text compact-status" role="status" aria-live="polite" aria-atomic="true">
+              {voiceStatusMessage}
+            </p>
+          ) : null}
+        </div>
+      </section>
+    ),
+    help: (
+      <section
+        key="help"
+        ref={helpSectionRef}
+        className="reader-tool-suite reader-help-panel"
+        data-reader-region="help"
+        aria-labelledby={helpRegionTitleId}
+        aria-describedby={`${helpRegionHintId} ${shortcutsHintId}`}
+      >
+        <div className="reader-tool-suite-header">
+          <div>
+            <p className="reader-toolbar-label">Help</p>
+            <h3 id={helpRegionTitleId}>Shortcuts and orientation</h3>
+          </div>
+          <p id={helpRegionHintId}>
+            Keyboard landmarks and screen readers stay first here. Voice support stays secondary.
+          </p>
+        </div>
+
+        <div id={shortcutsHintId} className="reader-shortcuts-compact">
+          <p className="hint reader-shortcuts-note">
+            `Ctrl+1` document, `Ctrl+2` playback, `Ctrl+3` search, `Ctrl+4` highlights, `Ctrl+5` bookmarks,
+            `Ctrl+6` shortcuts. Core reading keys: `Space`, `J`, `K`, `R`, `F3`, `B`, `H`, and `Escape`.
+          </p>
+          <details className="reader-shortcuts-details">
+            <summary
+              ref={(element) => {
+                shortcutsSummaryRef.current = element;
+              }}
+              id={shortcutsReferenceId}
+              className="reader-shortcuts-summary"
+            >
+              Show full Reader shortcut help
+            </summary>
+            <div className="reader-shortcuts-reference" aria-labelledby={shortcutsReferenceId}>
+              {groupedAppShortcuts.map((shortcutGroup) => (
+                <div key={shortcutGroup.groupLabel} className="reader-shortcuts-group">
+                  <p className="reader-shortcuts-group-label">{shortcutGroup.groupLabel}</p>
+                  <ul className="simple-list reader-shortcuts-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
+                    {shortcutGroup.shortcuts.map((shortcut) => (
+                      <li key={shortcut.action}>
+                        <strong>{shortcut.keys}</strong>: {shortcut.description}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {groupedReaderShortcuts.map((shortcutGroup) => (
+                <div key={shortcutGroup.groupLabel} className="reader-shortcuts-group">
+                  <p className="reader-shortcuts-group-label">{shortcutGroup.groupLabel}</p>
+                  <ul className="simple-list reader-shortcuts-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
+                    {shortcutGroup.shortcuts.map((shortcut) => (
+                      <li key={shortcut.action}>
+                        <strong>{shortcut.keys}</strong>: {shortcut.description}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              <p className="hint reader-shortcuts-note">
+                Reader shortcuts stay inactive while you type in Reader controls, except `Escape`, which returns
+                focus to the document.
+              </p>
+              <p className="hint reader-shortcuts-note">
+                Full shortcut reference also stays available in `Settings`.
+              </p>
+            </div>
+          </details>
+          <p className="hint reader-shortcuts-note">
+            Voice commands stay optional and experimental. They never replace keyboard shortcuts for reliable Reader
+            control.
+          </p>
+          <details className="reader-shortcuts-details reader-voice-commands-details">
+            <summary className="reader-shortcuts-summary">Show supported voice commands</summary>
+            <div className="reader-shortcuts-reference" aria-label="Supported voice commands">
+              <p className="hint reader-shortcuts-note">
+                Voice commands work only after you press `Listen for one command`, and they only respond to exact
+                English phrases.
+              </p>
+              <ul className="simple-list reader-voice-command-list" aria-label="Supported Reader voice commands">
+                {readerVoiceCommandLabels.map((commandLabel) => (
+                  <li key={commandLabel}>
+                    <strong>{commandLabel}</strong>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </details>
+        </div>
+      </section>
+    )
+  };
+
   return (
     <section
       ref={readerWorkspaceRef}
@@ -2960,10 +3618,11 @@ function ReaderScreen(props: {
               {statusMessage}
             </p>
           </div>
-        </section>
-
-        <aside className="reader-utility-area" aria-label="Reader tools and landmarks">
-          <nav className="reader-tool-jump-nav" aria-label="Jump between Reader regions" aria-describedby={readerLandmarkHintId}>
+          <nav
+            className="reader-tool-jump-nav"
+            aria-label="Jump between Reader regions"
+            aria-describedby={readerLandmarkHintId}
+          >
             <p className="reader-tool-jump-label">Reader areas</p>
             <div className="reader-tool-jump-list">
               {readerRegionDefinitions.map((jumpTarget) => (
@@ -2984,558 +3643,10 @@ function ReaderScreen(props: {
               {readerLandmarkStatusMessage}
             </p>
           </nav>
+        </section>
 
-          <section
-            ref={playbackSectionRef}
-            className="reader-playback-bar"
-            data-reader-region="playback"
-            aria-labelledby={playbackRegionTitleId}
-            aria-describedby={playbackRegionHintId}
-          >
-            <div className="reader-tool-header">
-              <div>
-                <p className="reader-toolbar-label">Playback</p>
-                <h3 id={playbackRegionTitleId}>Reading controls</h3>
-              </div>
-            </div>
-            <p id={playbackRegionHintId} className="hint">
-              {returnToDocumentHint}
-            </p>
-            <div className="playback-row" role="group" aria-label="Primary playback actions">
-              <div className="playback-group playback-group-primary">
-                <button
-                  ref={playButtonRef}
-                  className="playback-primary-button"
-                  type="button"
-                  onClick={handlePlay}
-                  aria-describedby={statusId}
-                >
-                  {playbackState === "paused" ? "Resume" : "Play"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePause}
-                  disabled={!speechSynthesisAvailable || playbackState !== "playing"}
-                >
-                  Pause
-                </button>
-                <button
-                  type="button"
-                  onClick={handleStop}
-                  disabled={!speechSynthesisAvailable || playbackState === "idle"}
-                >
-                  Stop
-                </button>
-              </div>
-              <div className="playback-group" role="group" aria-label="Paragraph navigation">
-                <button
-                  type="button"
-                  onClick={() => moveToParagraph("previous")}
-                  disabled={!hasText || props.currentParagraphIndex === 0}
-                  aria-controls={currentParagraphId}
-                >
-                  Previous paragraph
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveToParagraph("next")}
-                  disabled={!hasText || props.currentParagraphIndex >= paragraphs.length - 1}
-                  aria-controls={currentParagraphId}
-                >
-                  Next paragraph
-                </button>
-                <button type="button" onClick={handleRepeatCurrentParagraph} disabled={!hasText}>
-                  Repeat paragraph
-                </button>
-              </div>
-            </div>
-
-            <div className="playback-secondary-row">
-              <label className="field playback-speed" htmlFor={speedInputId}>
-                <span>Playback speed</span>
-                <input
-                  id={speedInputId}
-                  className="brand-slider"
-                  type="range"
-                  min="0.5"
-                  max="2"
-                  step="0.1"
-                  value={props.playbackRate}
-                  onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
-                  aria-describedby={`${statusId} ${speedValueId}`}
-                  aria-valuetext={`${props.playbackRate.toFixed(1)} times speed`}
-                />
-                <span id={speedValueId} className="hint playback-speed-value">
-                  {props.playbackRate.toFixed(1)}x
-                </span>
-              </label>
-
-              <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
-                <div className="playback-voice-copy">
-                  <button
-                    ref={voiceCommandButtonRef}
-                    type="button"
-                    onClick={handleListenForVoiceCommand}
-                    disabled={voiceCommandInteractionDisabled}
-                    aria-pressed={isListeningForVoiceCommand}
-                    aria-describedby={`${voiceCommandStatusId} ${voiceCommandSupportId}`}
-                  >
-                    {isListeningForVoiceCommand
-                      ? "Stop listening"
-                      : voiceCommandInteractionDisabled
-                        ? "Voice commands unavailable here"
-                        : "Listen for one command"}
-                  </button>
-                  <p id={voiceCommandStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-                    {voiceCommandMessage || voiceCommandIdleMessage}
-                  </p>
-                  <p id={voiceCommandSupportId} className="hint playback-voice-note">
-                    {voiceCommandInteractionDisabled
-                      ? "Voice commands are currently downgraded on this device because this runtime did not keep listening reliably. Keyboard shortcuts and screen readers remain the reliable primary controls."
-                      : "Experimental. One exact English phrase per press. Keyboard shortcuts and screen readers remain the reliable primary controls."}
-                  </p>
-                </div>
-                <div className="playback-illustration" aria-hidden="true">
-                  <img
-                    className="playback-illustration-image"
-                    src={listeningModeArtwork}
-                    alt=""
-                    width={768}
-                    height={768}
-                    decoding="async"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="playback-readout">
-              <p
-                className={statusToneClass}
-                role={props.documentState.error || !speechSynthesisAvailable ? "alert" : "status"}
-                aria-live={props.documentState.error || !speechSynthesisAvailable ? "assertive" : "polite"}
-                aria-atomic="true"
-              >
-                <strong>Playback:</strong> {playbackStatusLabel}. {playbackMessage}
-              </p>
-              <p
-                id={positionStatusId}
-                className="status-message compact-status"
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                {paragraphs.length > 0
-                  ? `Position: paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
-                  : "Position: no document loaded."}
-              </p>
-              {voiceStatusMessage ? (
-                <p className="status-message error-text compact-status" role="status" aria-live="polite" aria-atomic="true">
-                  {voiceStatusMessage}
-                </p>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="reader-tool-suite" aria-labelledby={toolSuiteTitleId} aria-describedby={toolSuiteDescriptionId}>
-            <div className="reader-tool-suite-header">
-              <div>
-                <p className="reader-toolbar-label">Study tools</p>
-                <h3 id={toolSuiteTitleId}>Find, mark, and revisit</h3>
-              </div>
-              <p id={toolSuiteDescriptionId}>Search, highlights, and bookmarks stay together in one quiet rail.</p>
-            </div>
-
-            <div className="reader-study-overview" aria-describedby={studyReviewStatusId}>
-              <div className="reader-study-overview-copy">
-                <p className="reader-toolbar-label">Study trail</p>
-                <p className="reader-study-overview-message">{studyOverviewMessage}</p>
-                <p className="reader-study-overview-context">{studyContextMessage}</p>
-              </div>
-              <div className="reader-study-chip-row" aria-label="Study tool summary">
-                <span className="reader-chip">
-                  {activeSearchQuery
-                    ? `${searchMatches.length} match${searchMatches.length === 1 ? "" : "es"}`
-                    : "Search ready"}
-                </span>
-                <span className="reader-chip">
-                  {props.highlights.length} highlight{props.highlights.length === 1 ? "" : "s"}
-                </span>
-                <span className="reader-chip">
-                  {props.bookmarks.length} marker{props.bookmarks.length === 1 ? "" : "s"}
-                </span>
-                <span className="reader-chip">
-                  {savedStudyPoints.length} study point{savedStudyPoints.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <div className="reader-study-review-actions">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => handleSavedStudyPointStep("previous")}
-                  disabled={savedStudyPoints.length === 0}
-                  aria-describedby={studyReviewStatusId}
-                >
-                  Previous saved
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => handleSavedStudyPointStep("next")}
-                  disabled={savedStudyPoints.length === 0}
-                  aria-describedby={studyReviewStatusId}
-                >
-                  Next saved
-                </button>
-              </div>
-              <p id={studyReviewStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-                {savedReviewStatusMessage}
-              </p>
-            </div>
-
-            <div className="reader-suite-sections">
-              <section
-                ref={searchSectionRef}
-                className="reader-search-panel reader-suite-section"
-                data-reader-region="search"
-                aria-labelledby={searchLabelId}
-              >
-                <div className="reader-tool-header">
-                  <div>
-                    <p className="reader-toolbar-label">Search</p>
-                    <h3>Find inside this document</h3>
-                    <p className="reader-tool-meta">{searchSectionMeta}</p>
-                  </div>
-                </div>
-                <form className="reader-search-form" onSubmit={handleSearchSubmit}>
-                  <label className="field reader-search-field" htmlFor={searchInputId}>
-                    <span id={searchLabelId}>Search this document</span>
-                    <input
-                      ref={searchInputRef}
-                      id={searchInputId}
-                      name="documentSearch"
-                      type="search"
-                      value={searchInputValue}
-                      onChange={(event) => setSearchInputValue(event.target.value)}
-                      placeholder="Find text in this file…"
-                      autoComplete="off"
-                      disabled={!hasText || props.documentState.isLoading}
-                      aria-describedby={searchStatusId}
-                    />
-                  </label>
-                  <div className="reader-search-actions">
-                    <button type="submit" disabled={!hasText || props.documentState.isLoading}>
-                      Search
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSearchStep("previous")}
-                      disabled={searchMatches.length === 0}
-                      aria-controls={currentParagraphId}
-                    >
-                      Previous match
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSearchStep("next")}
-                      disabled={searchMatches.length === 0}
-                      aria-controls={currentParagraphId}
-                    >
-                      Next match
-                    </button>
-                  </div>
-                </form>
-                <p
-                  id={searchStatusId}
-                  className="status-message compact-status"
-                  role="status"
-                  aria-live="polite"
-                  aria-atomic="true"
-                >
-                  {searchStatusMessage}
-                </p>
-                <p className="hint reader-return-hint">{returnToDocumentHint}</p>
-              </section>
-
-              <section
-                ref={highlightSectionRef}
-                className="reader-highlights reader-suite-section"
-                data-reader-region="highlights"
-                aria-labelledby="reader-highlights-title"
-                tabIndex={-1}
-              >
-                <div className="reader-bookmarks-header">
-                  <div>
-                    <p className="reader-toolbar-label">Highlights</p>
-                    <h3 id="reader-highlights-title">Short text highlights</h3>
-                    <p className="reader-tool-meta">{highlightSectionMeta}</p>
-                  </div>
-                  <div className="reader-highlight-actions">
-                    <button
-                      ref={highlightSaveButtonRef}
-                      type="button"
-                      onClick={handleSaveHighlight}
-                      disabled={!hasText || !props.documentState.filePath || !selectedTextRange}
-                    >
-                      {highlightActionLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRemoveHighlight}
-                      disabled={!activeHighlight && !selectedExistingHighlight}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-                <p id={highlightStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-                  {highlightMessage}
-                </p>
-                <p className="hint">{highlightStatusText}</p>
-                <label className="field bookmark-note-field" htmlFor={highlightNoteInputId}>
-                  <span>Short note for this highlight</span>
-                  <input
-                    ref={highlightNoteInputRef}
-                    id={highlightNoteInputId}
-                    name="highlightNote"
-                    type="text"
-                    value={highlightNoteInputValue}
-                    onChange={(event) => setHighlightNoteInputValue(event.target.value)}
-                    maxLength={MAX_HIGHLIGHT_NOTE_LENGTH}
-                    placeholder="Optional note…"
-                    autoComplete="off"
-                    disabled={!hasText || (!selectedTextRange && !activeHighlight)}
-                    aria-describedby={highlightNoteHintId}
-                  />
-                </label>
-                <p id={highlightNoteHintId} className="hint">
-                  Keep notes short. Open a saved highlight or select text to work here. {returnToDocumentHint}
-                </p>
-                {props.highlights.length > 0 ? (
-                  <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
-                    {props.highlights.map((highlight, highlightIndex) => {
-                      const isCurrentParagraph = highlight.paragraphIndex === props.currentParagraphIndex;
-                      const isSearchResult = searchMatchesByParagraph.has(highlight.paragraphIndex);
-
-                      return (
-                        <li key={highlight.id} className="bookmark-list-item highlight-list-item">
-                          <div
-                            className={
-                              highlight.id === activeHighlightId ? "bookmark-button highlight-card highlight-card-active" : "bookmark-button highlight-card"
-                            }
-                          >
-                            <button
-                              ref={(element) => {
-                                highlightOpenButtonRefs.current[highlightIndex] = element;
-                              }}
-                              type="button"
-                              className="highlight-card-open"
-                              onClick={() => handleJumpToHighlight(highlight, highlightIndex)}
-                              aria-controls={`reader-paragraph-${highlight.paragraphIndex}`}
-                            >
-                              <span className="bookmark-button-title">Paragraph {highlight.paragraphIndex + 1}</span>
-                              {isCurrentParagraph || isSearchResult ? (
-                                <span className="bookmark-button-tags" aria-hidden="true">
-                                  {isCurrentParagraph ? <span className="bookmark-button-tag">Current paragraph</span> : null}
-                                  {isSearchResult ? <span className="bookmark-button-tag">Search result</span> : null}
-                                </span>
-                              ) : null}
-                              <span className="bookmark-button-preview">{highlight.previewText}</span>
-                              {highlight.note ? <span className="bookmark-button-note">Note: {highlight.note}</span> : null}
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary-button highlight-card-remove"
-                              onClick={() => {
-                                setActiveHighlightId(highlight.id);
-                                setHighlightNoteInputValue(highlight.note);
-                                props.onRemoveHighlight(highlight.id);
-                                setActiveHighlightId(null);
-                                setSelectedTextRange(null);
-                                clearBrowserSelection();
-                                setHighlightMessage(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
-                                props.onAnnounce(`Removed highlight from paragraph ${highlight.paragraphIndex + 1}.`);
-                              }}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="hint">Highlights will appear here after you select text and save one.</p>
-                )}
-              </section>
-
-              <section
-                ref={bookmarkSectionRef}
-                className="reader-bookmarks reader-suite-section"
-                data-reader-region="bookmarks"
-                aria-labelledby="reader-bookmarks-title"
-                tabIndex={-1}
-              >
-                <div className="reader-bookmarks-header">
-                  <div>
-                    <p className="reader-toolbar-label">Bookmarks</p>
-                    <h3 id="reader-bookmarks-title">Saved markers for this document</h3>
-                    <p className="reader-tool-meta">{bookmarkSectionMeta}</p>
-                  </div>
-                  <button type="button" onClick={handleAddBookmark} disabled={!hasText || !props.documentState.filePath}>
-                    {bookmarkActionLabel}
-                  </button>
-                </div>
-                <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
-                  {bookmarkMessage}
-                </p>
-                {currentParagraphPreview ? (
-                  <p className="hint reader-context-preview">Current paragraph: {currentParagraphPreview}</p>
-                ) : null}
-                <label className="field bookmark-note-field" htmlFor={bookmarkNoteInputId}>
-                  <span>Short note for this bookmarked paragraph</span>
-                  <input
-                    ref={bookmarkNoteInputRef}
-                    id={bookmarkNoteInputId}
-                    name="bookmarkNote"
-                    type="text"
-                    value={bookmarkNoteInputValue}
-                    onChange={(event) => setBookmarkNoteInputValue(event.target.value)}
-                    maxLength={MAX_BOOKMARK_NOTE_LENGTH}
-                    placeholder="Optional study note…"
-                    autoComplete="off"
-                    disabled={!hasText || !props.documentState.filePath}
-                    aria-describedby={bookmarkNoteHintId}
-                  />
-                </label>
-                <p id={bookmarkNoteHintId} className="hint">
-                  {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note. {returnToDocumentHint}
-                </p>
-                {props.bookmarks.length > 0 ? (
-                  <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
-                    {props.bookmarks.map((bookmark, bookmarkIndex) => {
-                      const isCurrentParagraph = bookmark.paragraphIndex === props.currentParagraphIndex;
-                      const isSearchResult = searchMatchesByParagraph.has(bookmark.paragraphIndex);
-
-                      return (
-                        <li key={`${bookmark.documentPath}-${bookmark.paragraphIndex}`} className="bookmark-list-item">
-                          <button
-                            ref={(element) => {
-                              bookmarkButtonRefs.current[bookmarkIndex] = element;
-                            }}
-                            type="button"
-                            className="bookmark-button"
-                            onClick={() => handleJumpToBookmark(bookmark, bookmarkIndex)}
-                            aria-controls={`reader-paragraph-${bookmark.paragraphIndex}`}
-                          >
-                            <span className="bookmark-button-title">Paragraph {bookmark.paragraphIndex + 1}</span>
-                            {isCurrentParagraph || isSearchResult ? (
-                              <span className="bookmark-button-tags" aria-hidden="true">
-                                {isCurrentParagraph ? <span className="bookmark-button-tag">Current paragraph</span> : null}
-                                {isSearchResult ? <span className="bookmark-button-tag">Search result</span> : null}
-                              </span>
-                            ) : null}
-                            <span className="bookmark-button-preview">{bookmark.previewText}</span>
-                            {bookmark.note ? <span className="bookmark-button-note">Note: {bookmark.note}</span> : null}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="hint">Bookmarks will appear here after you save one from the current paragraph.</p>
-                )}
-              </section>
-            </div>
-          </section>
-
-          <section
-            ref={helpSectionRef}
-            className="reader-tool-suite reader-help-panel"
-            data-reader-region="help"
-            aria-labelledby={helpRegionTitleId}
-            aria-describedby={`${helpRegionHintId} ${shortcutsHintId}`}
-          >
-            <div className="reader-tool-suite-header">
-              <div>
-                <p className="reader-toolbar-label">Help</p>
-                <h3 id={helpRegionTitleId}>Shortcuts and orientation</h3>
-              </div>
-              <p id={helpRegionHintId}>
-                Keyboard landmarks and screen readers stay first here. Voice support stays secondary.
-              </p>
-            </div>
-
-            <div id={shortcutsHintId} className="reader-shortcuts-compact">
-              <p className="hint reader-shortcuts-note">
-                `Ctrl+1` document, `Ctrl+2` playback, `Ctrl+3` search, `Ctrl+4` highlights, `Ctrl+5` bookmarks,
-                `Ctrl+6` shortcuts. Core reading keys: `Space`, `J`, `K`, `R`, `F3`, `B`, `H`, and `Escape`.
-              </p>
-              <details className="reader-shortcuts-details">
-                <summary
-                  ref={(element) => {
-                    shortcutsSummaryRef.current = element;
-                  }}
-                  id={shortcutsReferenceId}
-                  className="reader-shortcuts-summary"
-                >
-                  Show full Reader shortcut help
-                </summary>
-                <div className="reader-shortcuts-reference" aria-labelledby={shortcutsReferenceId}>
-                  {groupedAppShortcuts.map((shortcutGroup) => (
-                    <div key={shortcutGroup.groupLabel} className="reader-shortcuts-group">
-                      <p className="reader-shortcuts-group-label">{shortcutGroup.groupLabel}</p>
-                      <ul className="simple-list reader-shortcuts-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
-                        {shortcutGroup.shortcuts.map((shortcut) => (
-                          <li key={shortcut.action}>
-                            <strong>{shortcut.keys}</strong>: {shortcut.description}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                  {groupedReaderShortcuts.map((shortcutGroup) => (
-                    <div key={shortcutGroup.groupLabel} className="reader-shortcuts-group">
-                      <p className="reader-shortcuts-group-label">{shortcutGroup.groupLabel}</p>
-                      <ul className="simple-list reader-shortcuts-list" aria-label={`${shortcutGroup.groupLabel} shortcuts`}>
-                        {shortcutGroup.shortcuts.map((shortcut) => (
-                          <li key={shortcut.action}>
-                            <strong>{shortcut.keys}</strong>: {shortcut.description}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                  <p className="hint reader-shortcuts-note">
-                    Reader shortcuts stay inactive while you type in Reader controls, except `Escape`, which returns
-                    focus to the document.
-                  </p>
-                  <p className="hint reader-shortcuts-note">
-                    Full shortcut reference also stays available in `Settings`.
-                  </p>
-                </div>
-              </details>
-              <p className="hint reader-shortcuts-note">
-                Voice commands stay optional and experimental. They never replace keyboard shortcuts for reliable Reader
-                control.
-              </p>
-              <details className="reader-shortcuts-details reader-voice-commands-details">
-                <summary className="reader-shortcuts-summary">Show supported voice commands</summary>
-                <div className="reader-shortcuts-reference" aria-label="Supported voice commands">
-                  <p className="hint reader-shortcuts-note">
-                    Voice commands work only after you press `Listen for one command`, and they only respond to exact
-                    English phrases.
-                  </p>
-                  <ul className="simple-list reader-voice-command-list" aria-label="Supported Reader voice commands">
-                    {readerVoiceCommandLabels.map((commandLabel) => (
-                      <li key={commandLabel}>
-                        <strong>{commandLabel}</strong>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </details>
-            </div>
-          </section>
+        <aside className="reader-utility-area" aria-label="Reader tools">
+          {readerRailSectionOrder.map((sectionId) => readerRailSections[sectionId])}
         </aside>
       </div>
 
@@ -4710,3 +4821,5 @@ export function App() {
     </div>
   );
 }
+
+

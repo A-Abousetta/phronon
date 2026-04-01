@@ -20,6 +20,8 @@
     "src/speechVoices.ts",
     "src/speechVoices.test.ts",
     "src/voiceCommands.ts",
-    "src/voiceCommands.test.ts"
+    "src/voiceCommands.test.ts",
+    "src/readerLayout.ts",
+    "src/readerLayout.test.ts"
   ]
 }
