@@ -83,6 +83,15 @@ import {
   type VoiceReaderCommand
 } from "./voiceCommands";
 import { buildRuntimeDiagnosticsItems, type RuntimeSupportStatus } from "./runtimeDiagnostics";
+import {
+  buildReaderBookmarkHintMessage,
+  buildReaderDocumentReturnAnnouncement,
+  buildReaderHighlightHintMessage,
+  buildReaderRegionStatusMessage,
+  buildReaderSavedItemAnnouncement,
+  buildReaderSearchResultAnnouncement,
+  buildReaderSearchStatusMessage
+} from "./readerNavigation";
 import phrononMasterArtwork from "./assets/images/phronon-master-1024.png";
 import keyboardModeArtwork from "./assets/images/Keyboard mode.png";
 import listeningModeArtwork from "./assets/images/Listening mode.png";
@@ -340,6 +349,7 @@ const readerVoiceCommandLabels = [
   "Faster",
   "Slower"
 ] as const;
+const returnToDocumentHint = "Return to the document with Escape or Ctrl+1.";
 const readerRegionDefinitions = [
   {
     id: "document",
@@ -373,7 +383,7 @@ const readerRegionDefinitions = [
   },
   {
     id: "help",
-    label: "Help",
+    label: "Shortcuts",
     shortcutLabel: "Ctrl+6",
     ariaKeyshortcuts: "Control+6"
   }
@@ -886,7 +896,6 @@ function ReaderScreen(props: {
     activeSearchMatchIndex >= 0 && activeSearchMatchIndex < searchMatches.length
       ? searchMatches[activeSearchMatchIndex]
       : null;
-  const matchedParagraphCount = searchMatchesByParagraph.size;
   const voiceCommandIdleMessage = !voiceRecognitionAvailable
     ? voiceRecognitionAvailability.message
     : voiceCommandTrustState === "confirmed"
@@ -894,18 +903,14 @@ function ReaderScreen(props: {
       : voiceCommandTrustState === "unreliable"
         ? "Speech recognition was detected, but this Electron/Chromium runtime ended listening before any usable audio or speech was captured. Phronon is treating the voice button as unavailable here, and keyboard shortcuts remain the reliable primary workflow."
         : `${voiceRecognitionAvailability.message} Keyboard shortcuts remain the reliable primary workflow.`;
-  const searchStatusMessage =
-    props.documentState.isLoading
-      ? "Search will be available when the document finishes loading."
-      : !hasText
-        ? "Open a document to search inside it."
-        : !activeSearchQuery
-          ? "Enter text and press Search to look inside the current document."
-          : searchMatches.length === 0
-            ? `No matches found for "${activeSearchQuery}".`
-            : activeSearchMatch
-              ? `Match ${activeSearchMatchIndex + 1} of ${searchMatches.length} in paragraph ${activeSearchMatch.paragraphIndex + 1}. ${matchedParagraphCount} paragraph${matchedParagraphCount === 1 ? "" : "s"} contain ${matchedParagraphCount === 1 ? "this result" : "results"}.`
-            : `${searchMatches.length} matches found for "${activeSearchQuery}".`;
+  const searchStatusMessage = buildReaderSearchStatusMessage({
+    isLoading: props.documentState.isLoading,
+    hasText,
+    searchQuery: activeSearchQuery,
+    searchMatchCount: searchMatches.length,
+    activeSearchMatchIndex,
+    activeSearchParagraphIndex: activeSearchMatch?.paragraphIndex ?? null
+  });
   const activeReaderRegionLabel =
     readerRegionDefinitions.find((definition) => definition.id === activeReaderRegion)?.label ?? "Document";
 
@@ -957,42 +962,50 @@ function ReaderScreen(props: {
     const nextMatch = matches[matchIndex];
 
     if (!nextMatch) {
-      return "There are no search results to move through yet.";
+      return "No search results yet.";
     }
 
-    return `Search result ${matchIndex + 1} of ${matches.length} in paragraph ${nextMatch.paragraphIndex + 1}. Reader text focused.`;
+    return buildReaderSearchResultAnnouncement({
+      matchIndex,
+      matchCount: matches.length,
+      paragraphIndex: nextMatch.paragraphIndex
+    });
   }
 
   function buildBookmarkAnnouncement(bookmark: ParagraphBookmark, bookmarkIndex: number) {
-    return `Bookmark ${bookmarkIndex + 1} of ${props.bookmarks.length} in paragraph ${bookmark.paragraphIndex + 1}. Reader text focused${bookmark.note ? ". Note loaded." : "."}`;
+    return buildReaderSavedItemAnnouncement({
+      kind: "Bookmark",
+      itemIndex: bookmarkIndex,
+      itemCount: props.bookmarks.length,
+      paragraphIndex: bookmark.paragraphIndex,
+      hasNote: Boolean(bookmark.note)
+    });
   }
 
   function buildHighlightAnnouncement(highlight: TextHighlight, highlightIndex: number) {
-    return `Highlight ${highlightIndex + 1} of ${props.highlights.length} in paragraph ${highlight.paragraphIndex + 1}. Reader text focused${highlight.note ? ". Note loaded." : "."}`;
+    return buildReaderSavedItemAnnouncement({
+      kind: "Highlight",
+      itemIndex: highlightIndex,
+      itemCount: props.highlights.length,
+      paragraphIndex: highlight.paragraphIndex,
+      hasNote: Boolean(highlight.note)
+    });
   }
 
   function buildDocumentFocusAnnouncement(sourceRegion: ReaderRegionId | null) {
-    if (!hasText) {
-      return "Reader text will be available after a document is loaded.";
-    }
-
-    const messageParts = [
-      sourceRegion && sourceRegion !== "document"
-        ? `Returned to paragraph ${props.currentParagraphIndex + 1} from ${resolveReaderRegionLabel(sourceRegion).toLowerCase()}.`
-        : `Reader text focused at paragraph ${props.currentParagraphIndex + 1}.`
-    ];
-
-    if (activeSearchMatch && activeSearchMatch.paragraphIndex === props.currentParagraphIndex) {
-      messageParts.push(`Search result ${activeSearchMatchIndex + 1} of ${searchMatches.length} remains active.`);
-    } else if (activeHighlight && activeHighlight.paragraphIndex === props.currentParagraphIndex) {
-      messageParts.push(activeHighlight.note ? "Highlight note remains loaded." : "A saved highlight remains active here.");
-    } else if (currentBookmark?.paragraphIndex === props.currentParagraphIndex) {
-      messageParts.push(
-        currentBookmark.note ? "This paragraph already has a saved marker and note." : "This paragraph already has a saved marker."
-      );
-    }
-
-    return messageParts.join(" ");
+    return buildReaderDocumentReturnAnnouncement({
+      hasText,
+      paragraphIndex: props.currentParagraphIndex,
+      sourceRegionLabel:
+        sourceRegion && sourceRegion !== "document" ? resolveReaderRegionLabel(sourceRegion) : null,
+      activeSearchMatchIndex,
+      activeSearchMatchCount: searchMatches.length,
+      activeSearchParagraphIndex: activeSearchMatch?.paragraphIndex ?? null,
+      activeHighlightParagraphIndex: activeHighlight?.paragraphIndex ?? null,
+      activeHighlightHasNote: Boolean(activeHighlight?.note),
+      activeBookmarkParagraphIndex: currentBookmark?.paragraphIndex ?? null,
+      activeBookmarkHasNote: Boolean(currentBookmark?.note)
+    });
   }
 
   function logVoiceCommandDiagnostic(eventName: string, details?: Record<string, unknown>) {
@@ -2139,14 +2152,14 @@ function ReaderScreen(props: {
     playButtonRef.current?.focus();
     props.onAnnounce(
       hasText
-        ? `Jumped to playback. Play button focused for paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
-        : "Jumped to playback. Open a document to begin reading."
+        ? `Playback focused. Play is ready at paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
+        : "Playback focused. Open a file to start reading."
     );
   }
 
   function focusSearchInput() {
     if (!hasText || props.documentState.isLoading) {
-      props.onAnnounce("Search is not ready until a document is loaded.");
+      props.onAnnounce("Search is not ready until a file is loaded.");
       return;
     }
 
@@ -2155,16 +2168,16 @@ function ReaderScreen(props: {
     props.onAnnounce(
       activeSearchQuery
         ? searchMatches.length > 0
-          ? `Jumped to search. Search field focused. ${searchMatches.length} result${searchMatches.length === 1 ? "" : "s"} are ready for ${activeSearchQuery}.`
-          : `Jumped to search. Search field focused. No matches found for ${activeSearchQuery}.`
-        : "Jumped to search. Search field focused."
+          ? `Search focused. ${searchMatches.length} match${searchMatches.length === 1 ? "" : "es"} for "${activeSearchQuery}".`
+          : `Search focused. No matches for "${activeSearchQuery}".`
+        : "Search focused. Query field ready."
     );
   }
 
   function focusBookmarkTool() {
     if (!hasText || !props.documentState.filePath) {
       bookmarkSectionRef.current?.focus();
-      props.onAnnounce("Jumped to bookmarks. Bookmarks will be available after a document is loaded.");
+      props.onAnnounce("Bookmarks focused. Open a file to use markers.");
       return;
     }
 
@@ -2176,9 +2189,7 @@ function ReaderScreen(props: {
 
     if (targetButton) {
       targetButton.focus();
-      props.onAnnounce(
-        `Jumped to bookmarks. Current paragraph ${props.currentParagraphIndex + 1} already has a saved marker.`
-      );
+      props.onAnnounce(`Bookmarks focused. Marker for paragraph ${props.currentParagraphIndex + 1} is ready.`);
       return;
     }
 
@@ -2186,15 +2197,15 @@ function ReaderScreen(props: {
     bookmarkNoteInputRef.current?.select();
     props.onAnnounce(
       props.bookmarks.length > 0
-        ? `Jumped to bookmarks. Add or update a note for paragraph ${props.currentParagraphIndex + 1}, or tab to saved markers.`
-        : `Jumped to bookmarks. No saved markers yet. You can save a marker for paragraph ${props.currentParagraphIndex + 1}.`
+        ? `Bookmarks focused. Note field ready for paragraph ${props.currentParagraphIndex + 1}.`
+        : `Bookmarks focused. Save paragraph ${props.currentParagraphIndex + 1} as your first marker.`
     );
   }
 
   function focusHighlightTool() {
     if (!hasText || !props.documentState.filePath) {
       highlightSectionRef.current?.focus();
-      props.onAnnounce("Jumped to highlights. Highlights will be available after a document is loaded.");
+      props.onAnnounce("Highlights focused. Open a file to use highlights.");
       return;
     }
 
@@ -2207,7 +2218,7 @@ function ReaderScreen(props: {
     if (targetButton) {
       targetButton.focus();
       props.onAnnounce(
-        `Jumped to highlights. Paragraph ${props.highlights[currentHighlightIndex].paragraphIndex + 1} is ready for review.`
+        `Highlights focused. Saved highlight for paragraph ${props.highlights[currentHighlightIndex].paragraphIndex + 1} is ready.`
       );
       return;
     }
@@ -2215,33 +2226,33 @@ function ReaderScreen(props: {
     if ((selectedTextRange || activeHighlightId) && highlightNoteInputRef.current && !highlightNoteInputRef.current.disabled) {
       highlightNoteInputRef.current.focus();
       highlightNoteInputRef.current.select();
-      props.onAnnounce("Jumped to highlights. The highlight note field is ready.");
+      props.onAnnounce("Highlights focused. Note field ready.");
       return;
     }
 
     if (selectedTextRange && highlightSaveButtonRef.current && !highlightSaveButtonRef.current.disabled) {
       highlightSaveButtonRef.current.focus();
-      props.onAnnounce(`Jumped to highlights. Selected text in paragraph ${selectedTextRange.paragraphIndex + 1} is ready to save.`);
+      props.onAnnounce(`Highlights focused. Selection in paragraph ${selectedTextRange.paragraphIndex + 1} is ready to save.`);
       return;
     }
 
     highlightSectionRef.current?.focus();
     props.onAnnounce(
       props.highlights.length > 0
-        ? "Jumped to highlights. Tab to review saved highlights."
-        : "Jumped to highlights. Select text in the document to save a new highlight."
+        ? "Highlights focused. Saved highlights are ready below."
+        : "Highlights focused. Select text in the document to save a new highlight."
     );
   }
 
   function focusHelpRegion() {
     shortcutsSummaryRef.current?.focus();
-    props.onAnnounce("Jumped to help. Reader shortcut help focused. Landmark jumps use Ctrl+1 through Ctrl+6.");
+    props.onAnnounce("Shortcuts focused. Ctrl+1 through Ctrl+6 move between Reader areas.");
   }
 
   function focusReaderTextRegion(sourceRegion: ReaderRegionId | null = activeReaderRegionRef.current) {
     if (!hasText) {
       readerPanelRef.current?.focus();
-      props.onAnnounce("Reader text will be available after a document is loaded.");
+      props.onAnnounce("Reader text will be ready after a file is loaded.");
       return;
     }
 
@@ -2324,7 +2335,7 @@ function ReaderScreen(props: {
     if (!hasText) {
       setActiveSearchQuery("");
       setActiveSearchMatchIndex(-1);
-      props.onAnnounce("Open a document to search inside it.");
+      props.onAnnounce("Open a file to search it.");
       return;
     }
 
@@ -2345,7 +2356,7 @@ function ReaderScreen(props: {
     if (nextMatches.length === 0) {
       setActiveSearchMatchIndex(-1);
       searchInputRef.current?.focus();
-      props.onAnnounce(`No matches found for ${nextQuery}.`);
+      props.onAnnounce(`No matches for "${nextQuery}".`);
       return;
     }
 
@@ -2355,13 +2366,13 @@ function ReaderScreen(props: {
     setActiveSearchMatchIndex(preferredMatchIndex);
     props.onCurrentParagraphIndexChange(nextMatches[preferredMatchIndex].paragraphIndex);
     props.onAnnounce(
-      `${nextMatches.length} search result${nextMatches.length === 1 ? "" : "s"} found. ${buildSearchResultAnnouncement(preferredMatchIndex, nextMatches)}`
+      `${nextMatches.length} match${nextMatches.length === 1 ? "" : "es"} found. ${buildSearchResultAnnouncement(preferredMatchIndex, nextMatches)}`
     );
   }
 
   function handleSearchStep(direction: "previous" | "next") {
     if (searchMatches.length === 0) {
-      props.onAnnounce("There are no search results to move through yet.");
+      props.onAnnounce("No search results yet.");
       return;
     }
 
@@ -2520,40 +2531,29 @@ function ReaderScreen(props: {
       : null;
   const bookmarkActionLabel = currentBookmark ? "Update marker" : "Save marker";
   const highlightActionLabel = selectedExistingHighlight ? "Update highlight" : "Save highlight";
-  const bookmarkNoteStatus =
-    currentBookmark?.note
-      ? "This bookmarked paragraph already has a saved note."
-      : currentBookmark
-        ? "This paragraph is bookmarked. Add a short note or leave it blank."
-        : "Saving a marker here can include a short optional note.";
-  const highlightStatusText = !hasText
-    ? "Open a document to add a highlight."
-    : selectedTextRange
-      ? `Selected text in paragraph ${selectedTextRange.paragraphIndex + 1}: ${selectedTextRange.selectedText}`
-      : activeHighlight
-        ? `Selected saved highlight in paragraph ${activeHighlight.paragraphIndex + 1}: ${activeHighlight.selectedText}`
-        : "Select a word or short phrase in the Reader text, then save it as a highlight.";
+  const bookmarkNoteStatus = buildReaderBookmarkHintMessage({
+    hasBookmark: Boolean(currentBookmark),
+    hasNote: Boolean(currentBookmark?.note)
+  });
+  const highlightStatusText = buildReaderHighlightHintMessage({
+    hasText,
+    selectedParagraphIndex: selectedTextRange?.paragraphIndex ?? null,
+    selectedTextPreview: selectedTextRange ? buildBookmarkPreviewText(selectedTextRange.selectedText, 68) : null,
+    activeHighlightParagraphIndex: activeHighlight?.paragraphIndex ?? null,
+    activeHighlightPreview: activeHighlight ? buildBookmarkPreviewText(activeHighlight.selectedText, 68) : null
+  });
   const selectedParagraphIndex = selectedTextRange?.paragraphIndex ?? null;
-  const readerLandmarkStatusMessage =
-    activeReaderRegion === "document"
-      ? paragraphs.length > 0
-        ? `Current area: ${activeReaderRegionLabel}. Paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
-        : `Current area: ${activeReaderRegionLabel}. No document loaded yet.`
-      : activeReaderRegion === "search"
-        ? activeSearchQuery
-          ? searchMatches.length > 0
-            ? `Current area: ${activeReaderRegionLabel}. ${searchMatches.length} result${searchMatches.length === 1 ? "" : "s"} ready for ${activeSearchQuery}.`
-            : `Current area: ${activeReaderRegionLabel}. No matches found for ${activeSearchQuery}.`
-          : `Current area: ${activeReaderRegionLabel}. Search field ready.`
-        : activeReaderRegion === "highlights"
-          ? `Current area: ${activeReaderRegionLabel}. ${props.highlights.length} saved highlight${props.highlights.length === 1 ? "" : "s"} in this document.`
-          : activeReaderRegion === "bookmarks"
-            ? `Current area: ${activeReaderRegionLabel}. ${props.bookmarks.length} saved marker${props.bookmarks.length === 1 ? "" : "s"} in this document.`
-            : activeReaderRegion === "help"
-              ? "Current area: Help. Shortcut summary and navigation guidance are ready."
-              : paragraphs.length > 0
-                ? `Current area: ${activeReaderRegionLabel}. Paragraph ${props.currentParagraphIndex + 1} of ${paragraphs.length}.`
-                : `Current area: ${activeReaderRegionLabel}. Open a document to begin reading.`;
+  const readerLandmarkStatusMessage = buildReaderRegionStatusMessage({
+    activeRegion: activeReaderRegion,
+    activeRegionLabel: activeReaderRegionLabel,
+    hasText,
+    paragraphIndex: props.currentParagraphIndex,
+    paragraphCount: paragraphs.length,
+    searchQuery: activeSearchQuery,
+    searchMatchCount: searchMatches.length,
+    highlightCount: props.highlights.length,
+    bookmarkCount: props.bookmarks.length
+  });
 
   useEffect(() => {
     setBookmarkMessage(
@@ -2593,8 +2593,8 @@ function ReaderScreen(props: {
     const currentParagraph = paragraphs[props.currentParagraphIndex];
 
     if (!props.documentState.filePath || !currentParagraph) {
-      setBookmarkMessage("Open a document before saving a bookmark.");
-      props.onAnnounce("Open a document before saving a marker.");
+      setBookmarkMessage("Open a file before saving a marker.");
+      props.onAnnounce("Open a file before saving a marker.");
       return;
     }
 
@@ -2726,8 +2726,8 @@ function ReaderScreen(props: {
     focusParagraph(bookmark.paragraphIndex);
     setBookmarkMessage(
       bookmark.note
-        ? `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}. Note loaded for review.`
-        : `Jumped to bookmarked paragraph ${bookmark.paragraphIndex + 1}.`
+        ? `Moved to paragraph ${bookmark.paragraphIndex + 1}. Marker note ready.`
+        : `Moved to paragraph ${bookmark.paragraphIndex + 1}.`
     );
     props.onAnnounce(buildBookmarkAnnouncement(bookmark, bookmarkIndex));
   }
@@ -2740,14 +2740,14 @@ function ReaderScreen(props: {
     setHighlightNoteInputValue(highlight.note);
     setHighlightMessage(
       highlight.note
-        ? `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}. Note loaded for editing.`
-        : `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}.`
+        ? `Moved to paragraph ${highlight.paragraphIndex + 1}. Highlight note ready.`
+        : `Moved to paragraph ${highlight.paragraphIndex + 1}.`
     );
     const resolvedHighlightIndex =
       highlightIndex ?? props.highlights.findIndex((savedHighlight) => savedHighlight.id === highlight.id);
     props.onAnnounce(
       resolvedHighlightIndex === -1
-        ? `Jumped to highlight in paragraph ${highlight.paragraphIndex + 1}. Reader text focused${highlight.note ? ". Note loaded." : "."}`
+        ? `Moved to paragraph ${highlight.paragraphIndex + 1}.${highlight.note ? " Highlight note ready." : ""}`
         : buildHighlightAnnouncement(highlight, resolvedHighlightIndex)
     );
   }
@@ -2773,7 +2773,7 @@ function ReaderScreen(props: {
               disabled={isFilePickerLoading}
               aria-label={isFilePickerLoading ? "Choosing document" : "Open a study file"}
             >
-              {isFilePickerLoading ? "Choosing document..." : "Open file"}
+              {isFilePickerLoading ? "Choosing document…" : "Open file"}
             </button>
           </div>
 
@@ -2813,7 +2813,7 @@ function ReaderScreen(props: {
 
         <aside className="reader-utility-area" aria-label="Reader tools and landmarks">
           <nav className="reader-tool-jump-nav" aria-label="Jump between Reader regions" aria-describedby={readerLandmarkHintId}>
-            <p className="reader-tool-jump-label">Jump to</p>
+            <p className="reader-tool-jump-label">Reader areas</p>
             <div className="reader-tool-jump-list">
               {readerRegionDefinitions.map((jumpTarget) => (
                 <button
@@ -2830,7 +2830,7 @@ function ReaderScreen(props: {
               ))}
             </div>
             <p id={readerLandmarkHintId} className="hint reader-region-status">
-              {readerLandmarkStatusMessage} Landmark jumps use `Ctrl+1` through `Ctrl+6`.
+              {readerLandmarkStatusMessage}
             </p>
           </nav>
 
@@ -2848,7 +2848,7 @@ function ReaderScreen(props: {
               </div>
             </div>
             <p id={playbackRegionHintId} className="hint">
-              Playback stays within easy reach here. Press `Escape` or `Ctrl+1` to return to the current paragraph.
+              {returnToDocumentHint}
             </p>
             <div className="playback-row" role="group" aria-label="Primary playback actions">
               <div className="playback-group playback-group-primary">
@@ -2991,7 +2991,7 @@ function ReaderScreen(props: {
                 <p className="reader-toolbar-label">Study tools</p>
                 <h3 id={toolSuiteTitleId}>Find, mark, and revisit</h3>
               </div>
-              <p id={toolSuiteDescriptionId}>Search, highlights, and bookmarks stay together here so the rail scans faster.</p>
+              <p id={toolSuiteDescriptionId}>Search, highlights, and bookmarks stay together in one quiet rail.</p>
             </div>
 
             <div className="reader-suite-sections">
@@ -3017,7 +3017,7 @@ function ReaderScreen(props: {
                       type="search"
                       value={searchInputValue}
                       onChange={(event) => setSearchInputValue(event.target.value)}
-                      placeholder="Find text in this file..."
+                      placeholder="Find text in this file…"
                       autoComplete="off"
                       disabled={!hasText || props.documentState.isLoading}
                       aria-describedby={searchStatusId}
@@ -3054,7 +3054,7 @@ function ReaderScreen(props: {
                 >
                   {searchStatusMessage}
                 </p>
-                <p className="hint">Press `Escape` or `Ctrl+1` from the search field to return to the document text.</p>
+                <p className="hint reader-return-hint">{returnToDocumentHint}</p>
               </section>
 
               <section
@@ -3101,15 +3101,14 @@ function ReaderScreen(props: {
                     value={highlightNoteInputValue}
                     onChange={(event) => setHighlightNoteInputValue(event.target.value)}
                     maxLength={MAX_HIGHLIGHT_NOTE_LENGTH}
-                    placeholder="Optional note..."
+                    placeholder="Optional note…"
                     autoComplete="off"
                     disabled={!hasText || (!selectedTextRange && !activeHighlight)}
                     aria-describedby={highlightNoteHintId}
                   />
                 </label>
                 <p id={highlightNoteHintId} className="hint">
-                  Keep highlight notes short. Select text to save a new one, or open a saved highlight to edit it.
-                  Press `Escape` or `Ctrl+1` to return to the document text.
+                  Keep notes short. Open a saved highlight or select text to work here. {returnToDocumentHint}
                 </p>
                 {props.highlights.length > 0 ? (
                   <ul className="simple-list bookmark-list" aria-label="Highlights for the current document">
@@ -3178,7 +3177,7 @@ function ReaderScreen(props: {
                   {bookmarkMessage}
                 </p>
                 {currentParagraphPreview ? (
-                  <p className="hint">Current paragraph preview: {currentParagraphPreview}</p>
+                  <p className="hint reader-context-preview">Current paragraph: {currentParagraphPreview}</p>
                 ) : null}
                 <label className="field bookmark-note-field" htmlFor={bookmarkNoteInputId}>
                   <span>Short note for this bookmarked paragraph</span>
@@ -3190,15 +3189,14 @@ function ReaderScreen(props: {
                     value={bookmarkNoteInputValue}
                     onChange={(event) => setBookmarkNoteInputValue(event.target.value)}
                     maxLength={MAX_BOOKMARK_NOTE_LENGTH}
-                    placeholder="Optional study note..."
+                    placeholder="Optional study note…"
                     autoComplete="off"
                     disabled={!hasText || !props.documentState.filePath}
                     aria-describedby={bookmarkNoteHintId}
                   />
                 </label>
                 <p id={bookmarkNoteHintId} className="hint">
-                  {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note. Press `Escape`
-                  or `Ctrl+1` to return to the document text.
+                  {bookmarkNoteStatus} Keep it short. Clear the field and save again to remove the note. {returnToDocumentHint}
                 </p>
                 {props.bookmarks.length > 0 ? (
                   <ul className="simple-list bookmark-list" aria-label="Bookmarks for the current document">
@@ -3237,18 +3235,17 @@ function ReaderScreen(props: {
             <div className="reader-tool-suite-header">
               <div>
                 <p className="reader-toolbar-label">Help</p>
-                <h3 id={helpRegionTitleId}>Shortcuts and navigation help</h3>
+                <h3 id={helpRegionTitleId}>Shortcuts and orientation</h3>
               </div>
               <p id={helpRegionHintId}>
-                Screen readers and keyboard landmarks are the reliable Reader path. Voice support stays secondary here.
+                Keyboard landmarks and screen readers stay first here. Voice support stays secondary.
               </p>
             </div>
 
             <div id={shortcutsHintId} className="reader-shortcuts-compact">
               <p className="hint reader-shortcuts-note">
-                Landmarks: `Ctrl+1` document, `Ctrl+2` playback, `Ctrl+3` search, `Ctrl+4` highlights, `Ctrl+5`
-                bookmarks, `Ctrl+6` help. Core reading keys remain `Space`, `J`, `K`, `R`, `F3`, `B`, `H`, and
-                `Escape`.
+                `Ctrl+1` document, `Ctrl+2` playback, `Ctrl+3` search, `Ctrl+4` highlights, `Ctrl+5` bookmarks,
+                `Ctrl+6` shortcuts. Core reading keys: `Space`, `J`, `K`, `R`, `F3`, `B`, `H`, and `Escape`.
               </p>
               <details className="reader-shortcuts-details">
                 <summary
@@ -3287,7 +3284,7 @@ function ReaderScreen(props: {
                   ))}
                   <p className="hint reader-shortcuts-note">
                     Reader shortcuts stay inactive while you type in Reader controls, except `Escape`, which returns
-                    focus to the document text.
+                    focus to the document.
                   </p>
                   <p className="hint reader-shortcuts-note">
                     Full shortcut reference also stays available in `Settings`.

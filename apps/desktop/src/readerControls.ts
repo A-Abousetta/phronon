@@ -129,7 +129,7 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
   {
     action: "focusReaderText",
     keys: "Escape or Ctrl+1",
-    description: "Return focus to the document text region.",
+    description: "Return focus to the document.",
     groupLabel: "Landmarks",
     scope: "reader",
     typingBehavior: "ignoreWhileTyping"
@@ -144,7 +144,7 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
   },
   {
     action: "focusSearch",
-    keys: "Ctrl+F, /, or Ctrl+3",
+    keys: "Ctrl+3, Ctrl+F, or /",
     description: "Focus the Reader search box.",
     groupLabel: "Landmarks",
     scope: "reader",
@@ -152,7 +152,7 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
   },
   {
     action: "focusHighlights",
-    keys: "Ctrl+Shift+H or Ctrl+4",
+    keys: "Ctrl+4 or Ctrl+Shift+H",
     description: "Focus the highlights tool for the current document.",
     groupLabel: "Landmarks",
     scope: "reader",
@@ -160,7 +160,7 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
   },
   {
     action: "focusBookmarks",
-    keys: "Ctrl+Shift+B or Ctrl+5",
+    keys: "Ctrl+5 or Ctrl+Shift+B",
     description: "Focus the bookmarks tool for the current document.",
     groupLabel: "Landmarks",
     scope: "reader",
@@ -169,7 +169,7 @@ export const readerShortcutDefinitions: ShortcutDefinition<ReaderShortcutAction>
   {
     action: "focusHelp",
     keys: "Ctrl+6",
-    description: "Focus Reader shortcut and navigation help.",
+    description: "Focus Reader shortcuts and orientation help.",
     groupLabel: "Landmarks",
     scope: "reader",
     typingBehavior: "ignoreWhileTyping"

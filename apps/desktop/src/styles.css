@@ -900,47 +900,49 @@ select:disabled {
 
 .reader-tool-jump-nav {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.42rem;
   padding: 0.1rem 0;
 }
 
 .reader-tool-jump-label {
   margin: 0;
-  font-size: 0.77rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
+  font-size: 0.73rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #d5fff5;
+  color: #c9ebe3;
 }
 
 .reader-tool-jump-list {
   display: flex;
-  gap: 0.45rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
 }
 
 .reader-tool-jump-button {
-  display: grid;
-  gap: 0.08rem;
-  align-items: start;
-  min-height: 2.2rem;
-  min-width: 6rem;
-  padding: 0.45rem 0.72rem;
-  border: 1px solid rgba(193, 241, 229, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  min-height: 2.05rem;
+  min-width: 5.35rem;
+  padding: 0.42rem 0.68rem;
+  border: 1px solid rgba(193, 241, 229, 0.08);
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.018);
   color: #dff9f3;
   box-shadow: var(--shadow-inset);
   text-align: left;
 }
 
 .reader-tool-jump-button-label {
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .reader-tool-jump-shortcut {
   color: #b7d6cf;
   font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 .reader-tool-jump-button[data-current="true"] {
@@ -954,8 +956,12 @@ select:disabled {
 }
 
 .reader-region-status {
-  margin: 0.1rem 0 0;
+  margin: 0.08rem 0 0;
   max-width: 28rem;
+  padding: 0.58rem 0.72rem;
+  border: 1px solid rgba(193, 241, 229, 0.08);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.016);
 }
 
 .reader-help-panel {
@@ -970,13 +976,13 @@ select:disabled {
 
 .reader-tool-suite {
   display: grid;
-  gap: 0.9rem;
-  padding: 1rem 1.05rem 1.05rem;
+  gap: 0.82rem;
+  padding: 0.94rem 1rem 1rem;
 }
 
 .reader-tool-suite-header {
   display: grid;
-  gap: 0.4rem;
+  gap: 0.32rem;
 }
 
 .reader-tool-suite-header h3 {
@@ -988,25 +994,25 @@ select:disabled {
   margin: 0;
   max-width: 28rem;
   color: var(--text-muted);
-  font-size: 0.93rem;
+  font-size: 0.9rem;
 }
 
 .reader-suite-sections {
   display: grid;
-  gap: 0.15rem;
+  gap: 0.28rem;
 }
 
 .reader-suite-section {
   display: grid;
-  gap: 0.72rem;
+  gap: 0.62rem;
   align-content: start;
   min-width: 0;
   padding: 0.08rem 0;
 }
 
 .reader-suite-section + .reader-suite-section {
-  margin-top: 0.15rem;
-  padding-top: 1rem;
+  margin-top: 0.08rem;
+  padding-top: 0.92rem;
   border-top: 1px solid rgba(193, 241, 229, 0.09);
 }
 
@@ -1491,8 +1497,8 @@ select:disabled {
 
 .reader-shortcuts-compact {
   display: grid;
-  gap: 0.55rem;
-  padding: 0.95rem 1rem;
+  gap: 0.48rem;
+  padding: 0.9rem 0.95rem;
 }
 
 .reader-shortcuts-details {
@@ -1559,7 +1565,7 @@ select:disabled {
 }
 
 .reader-shortcuts-note {
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   margin: 0;
 }
 
@@ -1575,7 +1581,7 @@ select:disabled {
 
 .bookmark-list {
   margin-top: 0.1rem;
-  max-height: 12rem;
+  max-height: 11.2rem;
   overflow: auto;
   padding-right: 0.3rem;
 }
@@ -1601,8 +1607,8 @@ select:disabled {
 .bookmark-button {
   display: grid;
   width: 100%;
-  gap: 0.26rem;
-  padding: 0.75rem 0.82rem;
+  gap: 0.22rem;
+  padding: 0.68rem 0.78rem;
   text-align: left;
   border: 1px solid rgba(193, 241, 229, 0.1);
   border-radius: 0.9rem;
@@ -1616,6 +1622,7 @@ select:disabled {
 .bookmark-button-note {
   color: var(--text-muted);
   font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .highlight-card {
@@ -1655,9 +1662,14 @@ select:disabled {
 }
 
 .reader-suite-section .status-message {
-  padding: 0.6rem 0.74rem;
+  padding: 0.54rem 0.7rem;
   border: 1px solid rgba(193, 241, 229, 0.1);
   background: rgba(255, 255, 255, 0.018);
+}
+
+.reader-return-hint,
+.reader-context-preview {
+  font-size: 0.88rem;
 }
 
 .voice-diagnostics-list {
