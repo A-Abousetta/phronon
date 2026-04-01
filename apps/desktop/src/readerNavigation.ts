@@ -218,14 +218,14 @@ export function buildReaderDocumentReturnAnnouncement(options: ReaderDocumentRet
 
 export function buildReaderBookmarkHintMessage(options: ReaderBookmarkHintOptions) {
   if (options.hasNote) {
-    return "A note is already saved for this marker.";
+    return "Note saved for this marker.";
   }
 
   if (options.hasBookmark) {
-    return "This paragraph is already marked. Add a note if you want one.";
+    return "This paragraph is already marked.";
   }
 
-  return "Add a short note if it helps.";
+  return "Add a note if it helps.";
 }
 
 export function buildReaderHighlightHintMessage(options: ReaderHighlightHintOptions) {
@@ -245,40 +245,40 @@ export function buildReaderHighlightHintMessage(options: ReaderHighlightHintOpti
       : `Editing highlight in paragraph ${options.activeHighlightParagraphIndex + 1}.`;
   }
 
-  return "Select a short passage in the document, then save it here.";
+  return "Select text in the document, then save it here.";
 }
 
 export function buildReaderStudyOverviewMessage(options: ReaderStudyOverviewOptions) {
   if (!options.hasText) {
-    return "Open a file to connect search, highlights, and markers.";
+    return "Open a file to start a study trail.";
   }
 
   if (options.searchQuery) {
     if (options.searchMatchCount === 0) {
-      return `No matches for "${options.searchQuery}". ${formatCount(options.savedPointCount, "saved study point")} remain ready to revisit.`;
+      return `No matches for "${options.searchQuery}". ${formatCount(options.savedPointCount, "saved study point")} still sit on the trail.`;
     }
 
     if (options.searchSavedPointCount > 0) {
-      return `${formatCount(options.searchMatchCount, "match", "matches")} across ${formatCount(options.searchMatchParagraphCount, "paragraph")}. ${formatCount(options.searchSavedPointCount, "saved study point")} already sit in those results.`;
+      return `${formatCount(options.searchMatchCount, "match", "matches")} across ${formatCount(options.searchMatchParagraphCount, "paragraph")}. ${formatCount(options.searchSavedPointCount, "saved study point")} already sit on the trail.`;
     }
   }
 
   if (options.savedPointCount === 0) {
     return options.searchQuery
-      ? `${formatCount(options.searchMatchCount, "match", "matches")} ready. Save markers or highlights to build a return path.`
-      : "Search, highlights, and markers are ready for this document.";
+      ? `${formatCount(options.searchMatchCount, "match", "matches")} ready. Save a marker or highlight.`
+      : "Search, markers, and highlights are ready.";
   }
 
-  return `${formatCount(options.savedPointCount, "saved study point")} across ${formatCount(options.savedParagraphCount, "paragraph")}. ${formatCount(options.highlightCount, "highlight")} and ${formatCount(options.bookmarkCount, "marker")} are ready to revisit.`;
+  return `Trail holds ${formatCount(options.savedPointCount, "saved study point")} across ${formatCount(options.savedParagraphCount, "paragraph")}.`;
 }
 
 export function buildReaderStudyContextMessage(options: ReaderStudyContextOptions) {
   if (!options.hasText) {
-    return "Load a document to start building a study trail.";
+    return "Load a document to build the trail.";
   }
 
   if (options.selectedParagraphIndex !== null) {
-    return `Selected text in paragraph ${options.selectedParagraphIndex + 1} is ready to save as a highlight.`;
+    return `Selection in paragraph ${options.selectedParagraphIndex + 1} is ready to save.`;
   }
 
   const paragraphNumber = options.currentParagraphIndex + 1;
@@ -305,15 +305,15 @@ export function buildReaderStudyContextMessage(options: ReaderStudyContextOption
   }
 
   if (details.length > 0) {
-    return `Current paragraph ${paragraphNumber} contains ${joinReadableList(details)}.`;
+    return `Paragraph ${paragraphNumber} has ${joinReadableList(details)}.`;
   }
 
-  return `Current paragraph ${paragraphNumber} is clear. Search, mark, or keep reading.`;
+  return `Paragraph ${paragraphNumber} is clear.`;
 }
 
 export function buildReaderSavedReviewStatusMessage(options: ReaderSavedReviewStatusOptions) {
   if (options.savedPointCount === 0) {
-    return "No saved study points yet. Save a marker or highlight to review it later.";
+    return "No saved study points yet.";
   }
 
   if (
@@ -321,8 +321,8 @@ export function buildReaderSavedReviewStatusMessage(options: ReaderSavedReviewSt
     options.activeSavedPointKind &&
     options.activeSavedPointParagraphIndex !== null
   ) {
-    return `${options.activeSavedPointKind === "bookmark" ? "Marker" : "Highlight"} ${options.activeSavedPointIndex + 1} of ${options.savedPointCount} is active at paragraph ${options.activeSavedPointParagraphIndex + 1}.${options.activeSavedPointHasNote ? " Note ready." : ""}`;
+    return `${options.activeSavedPointKind === "bookmark" ? "Marker" : "Highlight"} ${options.activeSavedPointIndex + 1} of ${options.savedPointCount} at paragraph ${options.activeSavedPointParagraphIndex + 1}.${options.activeSavedPointHasNote ? " Note ready." : ""}`;
   }
 
-  return `Review ${formatCount(options.savedPointCount, "saved study point")} across ${formatCount(options.savedParagraphCount, "paragraph")}.`;
+  return `${formatCount(options.savedPointCount, "saved study point")} across ${formatCount(options.savedParagraphCount, "paragraph")}.`;
 }

@@ -131,7 +131,7 @@ test("bookmark and highlight hints keep context without over-explaining", () => 
       hasBookmark: true,
       hasNote: false
     }),
-    "This paragraph is already marked. Add a note if you want one."
+    "This paragraph is already marked."
   );
 
   assert.equal(
@@ -159,7 +159,7 @@ test("study overview and context connect search with saved material", () => {
       savedParagraphCount: 2,
       searchSavedPointCount: 2
     }),
-    '4 matches across 3 paragraphs. 2 saved study points already sit in those results.'
+    "4 matches across 3 paragraphs. 2 saved study points already sit on the trail."
   );
 
   assert.equal(
@@ -173,7 +173,7 @@ test("study overview and context connect search with saved material", () => {
       currentParagraphHasBookmark: true,
       currentParagraphHighlightCount: 2
     }),
-    "Current paragraph 6 contains match 2 of 4, a saved marker, and 2 saved highlights."
+    "Paragraph 6 has match 2 of 4, a saved marker, and 2 saved highlights."
   );
 });
 
@@ -187,7 +187,7 @@ test("saved review status keeps revisit flow concise", () => {
       activeSavedPointParagraphIndex: null,
       activeSavedPointHasNote: false
     }),
-    "No saved study points yet. Save a marker or highlight to review it later."
+    "No saved study points yet."
   );
 
   assert.equal(
@@ -199,6 +199,6 @@ test("saved review status keeps revisit flow concise", () => {
       activeSavedPointParagraphIndex: 7,
       activeSavedPointHasNote: true
     }),
-    "Highlight 3 of 5 is active at paragraph 8. Note ready."
+    "Highlight 3 of 5 at paragraph 8. Note ready."
   );
 });
