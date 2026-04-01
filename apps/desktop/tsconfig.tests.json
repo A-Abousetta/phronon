@@ -11,6 +11,8 @@
   "include": [
     "src/readerControls.ts",
     "src/readerControls.test.ts",
+    "src/readerNavigation.ts",
+    "src/readerNavigation.test.ts",
     "src/documentWorkflow.ts",
     "src/documentWorkflow.test.ts",
     "src/runtimeDiagnostics.ts",
