@@ -138,6 +138,39 @@ function runTests() {
 
   assert.equal(
     getReaderShortcutAction({
+      key: "1",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusReaderText"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "2",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusPlayback"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "3",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusSearch"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
       key: "f",
       ctrlKey: true,
       metaKey: false,
@@ -217,6 +250,17 @@ function runTests() {
 
   assert.equal(
     getReaderShortcutAction({
+      key: "4",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusHighlights"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
       key: "H",
       ctrlKey: true,
       metaKey: false,
@@ -250,6 +294,17 @@ function runTests() {
 
   assert.equal(
     getReaderShortcutAction({
+      key: "5",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusBookmarks"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
       key: "/",
       code: "Slash",
       ctrlKey: false,
@@ -258,6 +313,17 @@ function runTests() {
       shiftKey: false
     }),
     "focusSearch"
+  );
+
+  assert.equal(
+    getReaderShortcutAction({
+      key: "6",
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false
+    }),
+    "focusHelp"
   );
 
   assert.equal(
@@ -320,8 +386,10 @@ function runTests() {
 
   assert.ok(appShortcutDefinitions.some((shortcut) => shortcut.action === "openDocument"));
   assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusSearch"));
+  assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusPlayback"));
   assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusBookmarks"));
   assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusHighlights"));
+  assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "focusHelp"));
   assert.ok(readerShortcutDefinitions.some((shortcut) => shortcut.action === "nextBookmark"));
 }
 
