@@ -48,11 +48,15 @@ export type BrowserSpeechRecognition = EventTarget & {
   interimResults: boolean;
   lang: string;
   maxAlternatives: number;
+  onaudioend: ((event: Event) => void) | null;
   onaudiostart: ((event: Event) => void) | null;
   onend: ((event: Event) => void) | null;
   onnomatch: ((event: Event) => void) | null;
   onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
   onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onsoundend: ((event: Event) => void) | null;
+  onsoundstart: ((event: Event) => void) | null;
+  onspeechend: ((event: Event) => void) | null;
   onspeechstart: ((event: Event) => void) | null;
   onstart: ((event: Event) => void) | null;
   start(): void;
@@ -61,6 +65,14 @@ export type BrowserSpeechRecognition = EventTarget & {
 };
 
 export type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+
+export type VoiceRecognitionLifecycleSnapshot = {
+  recognitionStartedAt: number | null;
+  audioStartedAt: number | null;
+  soundStartedAt: number | null;
+  speechStartedAt: number | null;
+  resultHandled: boolean;
+};
 
 const transcriptCommandMap: Record<string, VoiceReaderCommand> = {
   "open file": "openFile",
@@ -91,6 +103,27 @@ export function getVoiceReaderCommand(transcript: string) {
   }
 
   return transcriptCommandMap[normalizedTranscript] ?? null;
+}
+
+export function hasVoiceRecognitionCaptureActivity(snapshot: VoiceRecognitionLifecycleSnapshot) {
+  return (
+    snapshot.audioStartedAt !== null ||
+    snapshot.soundStartedAt !== null ||
+    snapshot.speechStartedAt !== null ||
+    snapshot.resultHandled
+  );
+}
+
+export function didVoiceRecognitionEndBeforeCapture(
+  snapshot: VoiceRecognitionLifecycleSnapshot,
+  elapsedSinceStartMs: number,
+  earlyEndThresholdMs: number
+) {
+  return (
+    snapshot.recognitionStartedAt !== null &&
+    elapsedSinceStartMs < earlyEndThresholdMs &&
+    !hasVoiceRecognitionCaptureActivity(snapshot)
+  );
 }
 
 export function getVoiceRecognitionConstructor(windowObject: Window) {

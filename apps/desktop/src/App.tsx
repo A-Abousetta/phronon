@@ -64,9 +64,11 @@ import {
   type BrowserSpeechRecognition,
   type BrowserSpeechRecognitionErrorEvent,
   type BrowserSpeechRecognitionEvent,
+  didVoiceRecognitionEndBeforeCapture,
   getVoiceReaderCommand,
   getVoiceRecognitionAvailability,
   getVoiceRecognitionConstructor,
+  hasVoiceRecognitionCaptureActivity,
   type VoiceReaderCommand
 } from "./voiceCommands";
 import { buildRuntimeDiagnosticsItems, type RuntimeSupportStatus } from "./runtimeDiagnostics";
@@ -182,11 +184,17 @@ type VoiceCommandSession = {
   requestedAt: number;
   recognitionStartedAt: number | null;
   audioStartedAt: number | null;
+  audioEndedAt: number | null;
+  soundStartedAt: number | null;
+  soundEndedAt: number | null;
   speechStartedAt: number | null;
+  speechEndedAt: number | null;
   finalStateReached: boolean;
   resultHandled: boolean;
   matchedCommand: boolean;
   manualStop: boolean;
+  microphoneReady: boolean;
+  lastError: string | null;
   transcripts: string[];
 };
 
@@ -303,6 +311,8 @@ const settingsShortcutGroupLabelMap: Record<string, string> = {
 };
 
 const voiceCommandEarlyEndThresholdMs = 900;
+const voiceCommandDebugLoggingEnabled =
+  typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
 const groupedSettingsShortcuts = [...groupedAppShortcuts, ...groupedReaderShortcuts].map((group) => ({
   ...group,
   settingsLabel: settingsShortcutGroupLabelMap[group.groupLabel]
@@ -766,6 +776,7 @@ function ReaderScreen(props: {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voiceRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const voiceCommandSessionRef = useRef<VoiceCommandSession | null>(null);
+  const voiceCommandStartRequestRef = useRef(0);
   const nextVoiceCommandAttemptIdRef = useRef(0);
   const paragraphRefs = useRef<Array<HTMLElement | null>>([]);
   const searchMatchRefs = useRef<Array<HTMLSpanElement | null>>([]);
@@ -827,6 +838,9 @@ function ReaderScreen(props: {
     voiceRecognitionAvailable ? "detected" : "unsupported"
   );
   const isListeningForVoiceCommand = voiceCommandPhase === "starting" || voiceCommandPhase === "listening";
+  const voiceCommandInteractionDisabled =
+    !voiceRecognitionAvailable ||
+    (voiceCommandTrustState === "unreliable" && !isListeningForVoiceCommand);
   const activeSearchMatch =
     activeSearchMatchIndex >= 0 && activeSearchMatchIndex < searchMatches.length
       ? searchMatches[activeSearchMatchIndex]
@@ -837,7 +851,7 @@ function ReaderScreen(props: {
     : voiceCommandTrustState === "confirmed"
       ? "Experimental voice commands listened successfully in this session. They still accept one exact English Reader command per press, and keyboard shortcuts remain the reliable primary workflow."
       : voiceCommandTrustState === "unreliable"
-        ? "Speech recognition was detected, but listening has been ending too early in this Electron environment to trust voice commands here. Keyboard shortcuts remain the reliable primary workflow."
+        ? "Speech recognition was detected, but this Electron/Chromium runtime ended listening before any usable audio or speech was captured. Phronon is treating the voice button as unavailable here, and keyboard shortcuts remain the reliable primary workflow."
         : `${voiceRecognitionAvailability.message} Keyboard shortcuts remain the reliable primary workflow.`;
   const searchStatusMessage =
     props.documentState.isLoading
@@ -899,15 +913,108 @@ function ReaderScreen(props: {
   }
 
   function logVoiceCommandDiagnostic(eventName: string, details?: Record<string, unknown>) {
+    if (!voiceCommandDebugLoggingEnabled) {
+      return;
+    }
+
     console.info("[Reader voice command]", eventName, details ?? {});
   }
 
+  function getVoiceCommandSessionSnapshot(session: VoiceCommandSession) {
+    return {
+      attemptId: session.attemptId,
+      requestedAt: session.requestedAt,
+      recognitionStartedAt: session.recognitionStartedAt,
+      audioStartedAt: session.audioStartedAt,
+      audioEndedAt: session.audioEndedAt,
+      soundStartedAt: session.soundStartedAt,
+      soundEndedAt: session.soundEndedAt,
+      speechStartedAt: session.speechStartedAt,
+      speechEndedAt: session.speechEndedAt,
+      microphoneReady: session.microphoneReady,
+      resultHandled: session.resultHandled,
+      matchedCommand: session.matchedCommand,
+      manualStop: session.manualStop,
+      lastError: session.lastError,
+      transcripts: session.transcripts
+    };
+  }
+
+  async function probeVoiceCommandMicrophoneReadiness() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return {
+        ok: false as const,
+        reason: "mediaDevicesUnavailable" as const,
+        detail: "This Electron/browser runtime does not expose microphone capture APIs to the Reader."
+      };
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true
+      });
+      stream.getTracks().forEach((track) => {
+        track.stop();
+      });
+      return {
+        ok: true as const
+      };
+    } catch (error) {
+      const errorName =
+        error instanceof DOMException
+          ? error.name
+          : error && typeof error === "object" && "name" in error && typeof error.name === "string"
+            ? error.name
+            : "UnknownError";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+            ? error.message
+            : "";
+
+      if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError" || errorName === "SecurityError") {
+        return {
+          ok: false as const,
+          reason: "permissionDenied" as const,
+          detail: errorMessage || "Microphone permission was denied before speech recognition could start."
+        };
+      }
+
+      if (errorName === "NotFoundError" || errorName === "DevicesNotFoundError") {
+        return {
+          ok: false as const,
+          reason: "noMicrophone" as const,
+          detail: errorMessage || "No microphone input device was available to the Reader."
+        };
+      }
+
+      if (errorName === "NotReadableError" || errorName === "TrackStartError" || errorName === "AbortError") {
+        return {
+          ok: false as const,
+          reason: "microphoneBusy" as const,
+          detail: errorMessage || "The microphone could not be opened for Reader voice commands."
+        };
+      }
+
+      return {
+        ok: false as const,
+        reason: "unknown" as const,
+        detail: errorMessage || `${errorName} prevented microphone access for Reader voice commands.`
+      };
+    }
+  }
+
   function clearVoiceRecognitionHandlers(recognition: BrowserSpeechRecognition) {
+    recognition.onaudioend = null;
     recognition.onaudiostart = null;
     recognition.onend = null;
     recognition.onnomatch = null;
     recognition.onerror = null;
     recognition.onresult = null;
+    recognition.onsoundend = null;
+    recognition.onsoundstart = null;
+    recognition.onspeechend = null;
     recognition.onspeechstart = null;
     recognition.onstart = null;
   }
@@ -958,7 +1065,7 @@ function ReaderScreen(props: {
     setVoiceCommandPhase(phase);
     setVoiceCommandMessage(message);
     logVoiceCommandDiagnostic("status", {
-      attemptId: session?.attemptId ?? null,
+      session: session ? getVoiceCommandSessionSnapshot(session) : null,
       phase,
       trustState: options?.trustState ?? null,
       message
@@ -1487,7 +1594,7 @@ function ReaderScreen(props: {
     }
   }
 
-  function handleListenForVoiceCommand() {
+  async function handleListenForVoiceCommand() {
     if (!voiceRecognitionAvailable) {
       setVoiceCommandTrustState("unsupported");
       setVoiceCommandPhase("unsupported");
@@ -1496,6 +1603,7 @@ function ReaderScreen(props: {
     }
 
     if (isListeningForVoiceCommand) {
+      voiceCommandStartRequestRef.current += 1;
       const activeSession = voiceCommandSessionRef.current;
 
       if (activeSession) {
@@ -1521,6 +1629,41 @@ function ReaderScreen(props: {
       return;
     }
 
+    const startRequestId = voiceCommandStartRequestRef.current + 1;
+    voiceCommandStartRequestRef.current = startRequestId;
+    setVoiceCommandPhase("starting");
+    setVoiceCommandMessage("Checking microphone access for one Reader voice command.");
+
+    const microphoneProbe = await probeVoiceCommandMicrophoneReadiness();
+    if (voiceCommandStartRequestRef.current !== startRequestId) {
+      logVoiceCommandDiagnostic("microphone-probe-cancelled", {
+        startRequestId
+      });
+      return;
+    }
+    logVoiceCommandDiagnostic("microphone-probe", microphoneProbe.ok ? { ok: true } : microphoneProbe);
+
+    if (!microphoneProbe.ok) {
+      if (microphoneProbe.reason === "permissionDenied") {
+        setVoiceCommandTrustState("detected");
+        setVoiceCommandPhase("permissionDenied");
+        setVoiceCommandMessage("Microphone permission is required before Reader voice commands can listen.");
+        return;
+      }
+
+      const isRuntimeFailure = microphoneProbe.reason === "mediaDevicesUnavailable";
+      setVoiceCommandTrustState(isRuntimeFailure ? "unreliable" : "unsupported");
+      setVoiceCommandPhase(isRuntimeFailure ? "interrupted" : "unsupported");
+      setVoiceCommandMessage(
+        isRuntimeFailure
+          ? "Speech recognition was detected, but this Electron/browser runtime could not open microphone capture for Reader voice commands."
+          : microphoneProbe.reason === "noMicrophone"
+            ? "No microphone was available, so Reader voice commands could not start."
+            : "Reader voice commands could not open the microphone on this device."
+      );
+      return;
+    }
+
     const recognition = new SpeechRecognitionConstructor();
     const nextAttemptId = nextVoiceCommandAttemptIdRef.current + 1;
     const session: VoiceCommandSession = {
@@ -1528,16 +1671,25 @@ function ReaderScreen(props: {
       requestedAt: Date.now(),
       recognitionStartedAt: null,
       audioStartedAt: null,
+      audioEndedAt: null,
+      soundStartedAt: null,
+      soundEndedAt: null,
       speechStartedAt: null,
+      speechEndedAt: null,
       finalStateReached: false,
       resultHandled: false,
       matchedCommand: false,
       manualStop: false,
+      microphoneReady: true,
+      lastError: null,
       transcripts: []
     };
 
     nextVoiceCommandAttemptIdRef.current = nextAttemptId;
     voiceCommandSessionRef.current = session;
+    logVoiceCommandDiagnostic("session-created", {
+      session: getVoiceCommandSessionSnapshot(session)
+    });
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = "en-US";
@@ -1549,19 +1701,43 @@ function ReaderScreen(props: {
         "Voice command started. Listening now for one exact English Reader command."
       );
       logVoiceCommandDiagnostic("started", {
-        attemptId: session.attemptId
+        session: getVoiceCommandSessionSnapshot(session)
       });
     };
     recognition.onaudiostart = () => {
       session.audioStartedAt = Date.now();
       logVoiceCommandDiagnostic("audio-start", {
-        attemptId: session.attemptId
+        session: getVoiceCommandSessionSnapshot(session)
+      });
+    };
+    recognition.onaudioend = () => {
+      session.audioEndedAt = Date.now();
+      logVoiceCommandDiagnostic("audio-end", {
+        session: getVoiceCommandSessionSnapshot(session)
+      });
+    };
+    recognition.onsoundstart = () => {
+      session.soundStartedAt = Date.now();
+      logVoiceCommandDiagnostic("sound-start", {
+        session: getVoiceCommandSessionSnapshot(session)
+      });
+    };
+    recognition.onsoundend = () => {
+      session.soundEndedAt = Date.now();
+      logVoiceCommandDiagnostic("sound-end", {
+        session: getVoiceCommandSessionSnapshot(session)
       });
     };
     recognition.onspeechstart = () => {
       session.speechStartedAt = Date.now();
       logVoiceCommandDiagnostic("speech-start", {
-        attemptId: session.attemptId
+        session: getVoiceCommandSessionSnapshot(session)
+      });
+    };
+    recognition.onspeechend = () => {
+      session.speechEndedAt = Date.now();
+      logVoiceCommandDiagnostic("speech-end", {
+        session: getVoiceCommandSessionSnapshot(session)
       });
     };
     recognition.onresult = (event: BrowserSpeechRecognitionEvent) => {
@@ -1577,8 +1753,7 @@ function ReaderScreen(props: {
       session.resultHandled = true;
       session.transcripts = commandAlternatives.filter((transcript) => transcript.trim().length > 0);
       logVoiceCommandDiagnostic("result", {
-        attemptId: session.attemptId,
-        transcripts: session.transcripts
+        session: getVoiceCommandSessionSnapshot(session)
       });
 
       if (!command) {
@@ -1606,7 +1781,7 @@ function ReaderScreen(props: {
     };
     recognition.onnomatch = () => {
       logVoiceCommandDiagnostic("no-match", {
-        attemptId: session.attemptId
+        session: getVoiceCommandSessionSnapshot(session)
       });
       completeVoiceCommandSession(
         "noMatch",
@@ -1621,20 +1796,21 @@ function ReaderScreen(props: {
     recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
       const elapsedSinceStart =
         session.recognitionStartedAt === null ? 0 : Date.now() - session.recognitionStartedAt;
+      session.lastError = event.error;
       const trustState =
         event.error === "audio-capture" || event.error === "language-not-supported"
           ? "unsupported"
-          : event.error === "not-allowed" || event.error === "service-not-allowed"
+        : event.error === "not-allowed" || event.error === "service-not-allowed"
             ? "detected"
-            : session.recognitionStartedAt === null || elapsedSinceStart < voiceCommandEarlyEndThresholdMs
+            : didVoiceRecognitionEndBeforeCapture(session, elapsedSinceStart, voiceCommandEarlyEndThresholdMs)
               ? "unreliable"
               : "confirmed";
 
       logVoiceCommandDiagnostic("error", {
-        attemptId: session.attemptId,
         error: event.error,
         message: event.message ?? null,
-        elapsedSinceStart
+        elapsedSinceStart,
+        session: getVoiceCommandSessionSnapshot(session)
       });
 
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
@@ -1689,6 +1865,19 @@ function ReaderScreen(props: {
         return;
       }
 
+      if (event.error === "network") {
+        completeVoiceCommandSession(
+          "interrupted",
+          "Speech recognition started, but the Electron/Chromium speech service stopped before a Reader command could be captured on this device.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState: "unreliable"
+          }
+        );
+        return;
+      }
+
       completeVoiceCommandSession(
         "interrupted",
         "Voice command listening was interrupted before a command was captured. This Electron/browser speech-recognition runtime may be unreliable on this device.",
@@ -1702,14 +1891,19 @@ function ReaderScreen(props: {
     recognition.onend = () => {
       const elapsedSinceStart =
         session.recognitionStartedAt === null ? 0 : Date.now() - session.recognitionStartedAt;
+      const endedBeforeCapture = didVoiceRecognitionEndBeforeCapture(
+        session,
+        elapsedSinceStart,
+        voiceCommandEarlyEndThresholdMs
+      );
 
       logVoiceCommandDiagnostic("ended", {
-        attemptId: session.attemptId,
         elapsedSinceStart,
+        captureActivity: hasVoiceRecognitionCaptureActivity(session),
         resultHandled: session.resultHandled,
         matchedCommand: session.matchedCommand,
         manualStop: session.manualStop,
-        transcripts: session.transcripts
+        session: getVoiceCommandSessionSnapshot(session)
       });
 
       if (session.finalStateReached) {
@@ -1730,10 +1924,23 @@ function ReaderScreen(props: {
         return;
       }
 
+      if (endedBeforeCapture) {
+        completeVoiceCommandSession(
+          "interrupted",
+          "Voice command listening ended before any audio or speech was detected, so this Electron/Chromium speech-recognition runtime is not reliable enough to present as a working Reader control here.",
+          {
+            method: "detachOnly",
+            recognition,
+            trustState: "unreliable"
+          }
+        );
+        return;
+      }
+
       if (session.recognitionStartedAt === null || elapsedSinceStart < voiceCommandEarlyEndThresholdMs) {
         completeVoiceCommandSession(
           "interrupted",
-          "Voice command listening ended almost immediately, so Phronon is treating this speech-recognition environment as unreliable on this device.",
+          "Voice command listening ended too quickly to capture a usable Reader command on this device.",
           {
             method: "detachOnly",
             recognition,
@@ -1774,7 +1981,7 @@ function ReaderScreen(props: {
         "Starting voice command listening. Phronon will confirm once the microphone stays active long enough to use."
       );
       logVoiceCommandDiagnostic("start-requested", {
-        attemptId: session.attemptId
+        session: getVoiceCommandSessionSnapshot(session)
       });
       recognition.start();
     } catch {
@@ -2532,17 +2739,23 @@ function ReaderScreen(props: {
                     ref={voiceCommandButtonRef}
                     type="button"
                     onClick={handleListenForVoiceCommand}
+                    disabled={voiceCommandInteractionDisabled}
                     aria-pressed={isListeningForVoiceCommand}
                     aria-describedby={`${voiceCommandStatusId} ${voiceCommandSupportId}`}
                   >
-                    {isListeningForVoiceCommand ? "Stop listening" : "Listen for one command"}
+                    {isListeningForVoiceCommand
+                      ? "Stop listening"
+                      : voiceCommandInteractionDisabled
+                        ? "Voice commands unavailable here"
+                        : "Listen for one command"}
                   </button>
                   <p id={voiceCommandStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
                     {voiceCommandMessage || voiceCommandIdleMessage}
                   </p>
                   <p id={voiceCommandSupportId} className="hint playback-voice-note">
-                    Experimental. One exact English phrase per press. Keyboard shortcuts and screen readers remain the
-                    reliable primary controls.
+                    {voiceCommandInteractionDisabled
+                      ? "Voice commands are currently downgraded on this device because this runtime did not keep listening reliably. Keyboard shortcuts and screen readers remain the reliable primary controls."
+                      : "Experimental. One exact English phrase per press. Keyboard shortcuts and screen readers remain the reliable primary controls."}
                   </p>
                 </div>
                 <div className="playback-illustration" aria-hidden="true">
