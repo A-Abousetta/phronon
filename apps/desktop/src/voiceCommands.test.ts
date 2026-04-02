@@ -2,156 +2,112 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  type BrowserSpeechRecognitionConstructor,
-  VOICE_COMMAND_DETECTED_MESSAGE,
-  VOICE_COMMAND_UNAVAILABLE_MESSAGE,
-  buildVoiceCommandIdleMessage,
-  buildVoiceCommandSupportMessage,
-  didVoiceRecognitionEndBeforeCapture,
-  getVoiceReaderCommand,
-  getVoiceRecognitionAvailability,
-  hasVoiceRecognitionCaptureActivity,
-  normalizeVoiceTranscript
+  buildInitialVoiceCommandStatus,
+  buildVoiceCommandButtonLabel,
+  buildVoiceCommandStatusMessage,
+  buildVoiceCommandSupportMessage
 } from "./voiceCommands.js";
 
-test("normalizeVoiceTranscript trims casing, spacing, and simple punctuation", () => {
-  assert.equal(normalizeVoiceTranscript("  Next   paragraph! "), "next paragraph");
-  assert.equal(normalizeVoiceTranscript("repeat-paragraph"), "repeat paragraph");
-});
-
-test("getVoiceReaderCommand matches only the supported exact commands", () => {
-  assert.equal(getVoiceReaderCommand("Open file"), "openFile");
-  assert.equal(getVoiceReaderCommand("pause."), "pause");
-  assert.equal(getVoiceReaderCommand("next paragraph"), "nextParagraph");
-  assert.equal(getVoiceReaderCommand("please play"), null);
-  assert.equal(getVoiceReaderCommand(""), null);
-});
-
-test("getVoiceRecognitionAvailability reports support clearly", () => {
-  const mockWindow = {
-    SpeechRecognition: function MockRecognition() {
-      return undefined;
-    } as unknown as BrowserSpeechRecognitionConstructor
-  } as unknown as Window;
-
-  assert.deepEqual(
-    getVoiceRecognitionAvailability(mockWindow),
-    {
-      available: true,
-      message: VOICE_COMMAND_DETECTED_MESSAGE
-    }
-  );
-
-  assert.deepEqual(getVoiceRecognitionAvailability({} as unknown as Window), {
-    available: false,
-    message: VOICE_COMMAND_UNAVAILABLE_MESSAGE
+test("voice command UI status starts from capability state", () => {
+  assert.deepEqual(buildInitialVoiceCommandStatus("availableToTry"), {
+    state: "availableToTry"
+  });
+  assert.deepEqual(buildInitialVoiceCommandStatus("unsupported"), {
+    state: "unsupported"
+  });
+  assert.deepEqual(buildInitialVoiceCommandStatus("unreliable"), {
+    state: "unreliable"
   });
 });
 
-test("voice command Reader copy stays compact while keeping keyboard-first fallback explicit", () => {
+test("voice command status copy keeps capability and failure states explicit", () => {
   assert.equal(
-    buildVoiceCommandIdleMessage({
-      availabilityMessage: VOICE_COMMAND_DETECTED_MESSAGE,
-      trustState: "detected"
+    buildVoiceCommandStatusMessage({
+      capabilityState: "availableToTry",
+      status: {
+        state: "availableToTry"
+      }
     }),
-    "Voice commands are available to try on this device. Still experimental until listening stays active."
+    "Voice commands are available to try with the experimental browser provider. Say one exact English command."
   );
 
   assert.equal(
-    buildVoiceCommandIdleMessage({
-      availabilityMessage: VOICE_COMMAND_DETECTED_MESSAGE,
-      trustState: "confirmed"
+    buildVoiceCommandStatusMessage({
+      capabilityState: "availableToTry",
+      status: {
+        state: "permissionDenied"
+      }
     }),
-    "Voice commands worked in this session. One exact English command per press."
+    "Microphone permission was denied, so Reader voice commands cannot listen."
   );
 
   assert.equal(
-    buildVoiceCommandIdleMessage({
-      availabilityMessage: VOICE_COMMAND_DETECTED_MESSAGE,
-      trustState: "unreliable"
+    buildVoiceCommandStatusMessage({
+      capabilityState: "unreliable",
+      status: {
+        state: "runtimeEndedEarly"
+      }
     }),
-    "Voice commands are unavailable here. Listening stopped before any speech was captured."
+    "The speech-recognition runtime ended before a Reader command could be captured."
   );
 
   assert.equal(
-    buildVoiceCommandSupportMessage({
-      interactionDisabled: true,
-      trustState: "unsupported"
+    buildVoiceCommandStatusMessage({
+      capabilityState: "availableToTry",
+      status: {
+        state: "heardCommand",
+        detail: "Heard command: Jump to search."
+      }
     }),
-    "Keyboard shortcuts and screen readers stay primary. Voice support needs browser speech recognition."
-  );
-
-  assert.equal(
-    buildVoiceCommandSupportMessage({
-      interactionDisabled: true,
-      trustState: "unreliable"
-    }),
-    "Keyboard shortcuts and screen readers stay primary. Voice listening was not reliable here."
-  );
-
-  assert.equal(
-    buildVoiceCommandSupportMessage({
-      interactionDisabled: false,
-      trustState: "confirmed"
-    }),
-    "Keyboard shortcuts and screen readers stay primary. Voice commands stay experimental."
+    "Heard command: Jump to search."
   );
 });
 
-test("voice recognition capture activity requires audio, speech, or a handled result", () => {
+test("voice command support copy stays honest about the experimental browser provider", () => {
   assert.equal(
-    hasVoiceRecognitionCaptureActivity({
-      recognitionStartedAt: Date.now(),
-      audioStartedAt: null,
-      soundStartedAt: null,
-      speechStartedAt: null,
-      resultHandled: false
+    buildVoiceCommandSupportMessage({
+      capabilityState: "unsupported"
     }),
-    false
+    "Keyboard shortcuts and screen readers stay primary. No voice-command provider is available here."
   );
 
   assert.equal(
-    hasVoiceRecognitionCaptureActivity({
-      recognitionStartedAt: Date.now(),
-      audioStartedAt: Date.now(),
-      soundStartedAt: null,
-      speechStartedAt: null,
-      resultHandled: false
+    buildVoiceCommandSupportMessage({
+      capabilityState: "availableToTry"
     }),
-    true
+    "Keyboard shortcuts and screen readers stay primary. Current voice support uses the experimental browser provider, not a bundled local recognizer."
+  );
+
+  assert.equal(
+    buildVoiceCommandSupportMessage({
+      capabilityState: "unreliable"
+    }),
+    "Keyboard shortcuts and screen readers stay primary. The experimental browser provider is disabled after ending early on this device/runtime."
   );
 });
 
-test("didVoiceRecognitionEndBeforeCapture flags immediate start-end failures without capture activity", () => {
-  const recognitionStartedAt = Date.now();
-
+test("voice command button labels reflect listening and downgrade states", () => {
   assert.equal(
-    didVoiceRecognitionEndBeforeCapture(
-      {
-        recognitionStartedAt,
-        audioStartedAt: null,
-        soundStartedAt: null,
-        speechStartedAt: null,
-        resultHandled: false
-      },
-      250,
-      900
-    ),
-    true
+    buildVoiceCommandButtonLabel({
+      capabilityState: "availableToTry",
+      isListening: true
+    }),
+    "Stop listening"
   );
 
   assert.equal(
-    didVoiceRecognitionEndBeforeCapture(
-      {
-        recognitionStartedAt,
-        audioStartedAt: recognitionStartedAt + 20,
-        soundStartedAt: null,
-        speechStartedAt: null,
-        resultHandled: false
-      },
-      250,
-      900
-    ),
-    false
+    buildVoiceCommandButtonLabel({
+      capabilityState: "unsupported",
+      isListening: false
+    }),
+    "Voice commands unavailable"
+  );
+
+  assert.equal(
+    buildVoiceCommandButtonLabel({
+      capabilityState: "unreliable",
+      isListening: false
+    }),
+    "Voice commands unreliable"
   );
 });

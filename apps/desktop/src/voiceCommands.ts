@@ -1,182 +1,108 @@
-export type VoiceReaderCommand =
-  | "openFile"
-  | "play"
-  | "pause"
-  | "stop"
-  | "nextParagraph"
-  | "previousParagraph"
-  | "repeatParagraph"
-  | "faster"
-  | "slower";
+import type { VoiceCommandCapabilityState } from "./voiceCommandProvider.js";
 
-export type VoiceRecognitionAvailability = {
-  available: boolean;
-  message: string;
+export type VoiceCommandUiState =
+  | "starting"
+  | "unsupported"
+  | "availableToTry"
+  | "listening"
+  | "heardCommand"
+  | "heardNothing"
+  | "noSupportedCommandMatched"
+  | "permissionDenied"
+  | "runtimeEndedEarly"
+  | "unreliable";
+
+export type VoiceCommandStatus = {
+  state: VoiceCommandUiState;
+  detail?: string | null;
 };
 
-export type VoiceCommandTrustState = "unsupported" | "detected" | "confirmed" | "unreliable";
-
-export const VOICE_COMMAND_DETECTED_MESSAGE = "Voice commands are available to try on this device.";
-export const VOICE_COMMAND_UNAVAILABLE_MESSAGE = "Voice commands are unavailable on this device.";
-
-export type BrowserSpeechRecognitionAlternative = {
-  transcript: string;
-  confidence: number;
-};
-
-export type BrowserSpeechRecognitionResult = {
-  length: number;
-  [index: number]: BrowserSpeechRecognitionAlternative;
-};
-
-export type BrowserSpeechRecognitionResultList = {
-  [index: number]: BrowserSpeechRecognitionResult;
-};
-
-export type BrowserSpeechRecognitionEvent = Event & {
-  resultIndex: number;
-  results: BrowserSpeechRecognitionResultList;
-};
-
-export type BrowserSpeechRecognitionErrorEvent = Event & {
-  error: string;
-  message?: string;
-};
-
-export type BrowserSpeechRecognition = EventTarget & {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  onaudioend: ((event: Event) => void) | null;
-  onaudiostart: ((event: Event) => void) | null;
-  onend: ((event: Event) => void) | null;
-  onnomatch: ((event: Event) => void) | null;
-  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
-  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
-  onsoundend: ((event: Event) => void) | null;
-  onsoundstart: ((event: Event) => void) | null;
-  onspeechend: ((event: Event) => void) | null;
-  onspeechstart: ((event: Event) => void) | null;
-  onstart: ((event: Event) => void) | null;
-  start(): void;
-  stop(): void;
-  abort(): void;
-};
-
-export type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
-
-export type VoiceRecognitionLifecycleSnapshot = {
-  recognitionStartedAt: number | null;
-  audioStartedAt: number | null;
-  soundStartedAt: number | null;
-  speechStartedAt: number | null;
-  resultHandled: boolean;
-};
-
-const transcriptCommandMap: Record<string, VoiceReaderCommand> = {
-  "open file": "openFile",
-  play: "play",
-  pause: "pause",
-  stop: "stop",
-  "next paragraph": "nextParagraph",
-  "previous paragraph": "previousParagraph",
-  "repeat paragraph": "repeatParagraph",
-  faster: "faster",
-  slower: "slower"
-};
-
-export function normalizeVoiceTranscript(transcript: string) {
-  return transcript
-    .toLowerCase()
-    .replace(/[.,!?;:]+/g, " ")
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export function getVoiceReaderCommand(transcript: string) {
-  const normalizedTranscript = normalizeVoiceTranscript(transcript);
-
-  if (!normalizedTranscript) {
-    return null;
-  }
-
-  return transcriptCommandMap[normalizedTranscript] ?? null;
-}
-
-export function hasVoiceRecognitionCaptureActivity(snapshot: VoiceRecognitionLifecycleSnapshot) {
-  return (
-    snapshot.audioStartedAt !== null ||
-    snapshot.soundStartedAt !== null ||
-    snapshot.speechStartedAt !== null ||
-    snapshot.resultHandled
-  );
-}
-
-export function didVoiceRecognitionEndBeforeCapture(
-  snapshot: VoiceRecognitionLifecycleSnapshot,
-  elapsedSinceStartMs: number,
-  earlyEndThresholdMs: number
-) {
-  return (
-    snapshot.recognitionStartedAt !== null &&
-    elapsedSinceStartMs < earlyEndThresholdMs &&
-    !hasVoiceRecognitionCaptureActivity(snapshot)
-  );
-}
-
-export function getVoiceRecognitionConstructor(windowObject: Window) {
-  const voiceRecognitionWindow = windowObject as Window & {
-    SpeechRecognition?: BrowserSpeechRecognitionConstructor;
-    webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
-  };
-
-  return voiceRecognitionWindow.SpeechRecognition ?? voiceRecognitionWindow.webkitSpeechRecognition ?? null;
-}
-
-export function getVoiceRecognitionAvailability(windowObject: Window): VoiceRecognitionAvailability {
-  if (getVoiceRecognitionConstructor(windowObject)) {
-    return {
-      available: true,
-      message: VOICE_COMMAND_DETECTED_MESSAGE
-    };
-  }
-
-  return {
-    available: false,
-    message: VOICE_COMMAND_UNAVAILABLE_MESSAGE
-  };
-}
-
-export function buildVoiceCommandIdleMessage(options: {
-  availabilityMessage: string;
-  trustState: VoiceCommandTrustState;
-}) {
-  switch (options.trustState) {
+export function buildInitialVoiceCommandStatus(
+  capabilityState: VoiceCommandCapabilityState
+): VoiceCommandStatus {
+  switch (capabilityState) {
     case "unsupported":
-      return options.availabilityMessage;
-    case "confirmed":
-      return "Voice commands worked in this session. One exact English command per press.";
+      return {
+        state: "unsupported"
+      };
     case "unreliable":
-      return "Voice commands are unavailable here. Listening stopped before any speech was captured.";
-    case "detected":
+      return {
+        state: "unreliable"
+      };
+    case "availableToTry":
     default:
-      return `${options.availabilityMessage} Still experimental until listening stays active.`;
+      return {
+        state: "availableToTry"
+      };
+  }
+}
+
+export function buildVoiceCommandStatusMessage(options: {
+  capabilityState: VoiceCommandCapabilityState;
+  status: VoiceCommandStatus;
+}) {
+  if (options.status.detail?.trim()) {
+    return options.status.detail;
+  }
+
+  switch (options.status.state) {
+    case "starting":
+      return "Checking microphone access for one Reader voice command.";
+    case "listening":
+      return "Listening for one exact English Reader command.";
+    case "heardCommand":
+      return "Reader voice command matched.";
+    case "heardNothing":
+      return "Voice command listening heard nothing before it ended.";
+    case "noSupportedCommandMatched":
+      return "Voice command heard speech, but no supported Reader command matched.";
+    case "permissionDenied":
+      return "Microphone permission was denied, so Reader voice commands cannot listen.";
+    case "runtimeEndedEarly":
+      return "The speech-recognition runtime ended before a Reader command could be captured.";
+    case "unsupported":
+      return "Voice commands are unavailable in this Electron/Chromium runtime.";
+    case "unreliable":
+      return "Voice commands are marked unreliable on this device/runtime.";
+    case "availableToTry":
+    default:
+      return options.capabilityState === "availableToTry"
+        ? "Voice commands are available to try with the experimental browser provider. Say one exact English command."
+        : options.capabilityState === "unreliable"
+          ? "Voice commands are marked unreliable on this device/runtime."
+          : "Voice commands are unavailable in this Electron/Chromium runtime.";
   }
 }
 
 export function buildVoiceCommandSupportMessage(options: {
-  interactionDisabled: boolean;
-  trustState: VoiceCommandTrustState;
+  capabilityState: VoiceCommandCapabilityState;
 }) {
-  if (options.trustState === "unsupported") {
-    return "Keyboard shortcuts and screen readers stay primary. Voice support needs browser speech recognition.";
+  if (options.capabilityState === "unsupported") {
+    return "Keyboard shortcuts and screen readers stay primary. No voice-command provider is available here.";
   }
 
-  if (options.trustState === "unreliable" && options.interactionDisabled) {
-    return "Keyboard shortcuts and screen readers stay primary. Voice listening was not reliable here.";
+  if (options.capabilityState === "unreliable") {
+    return "Keyboard shortcuts and screen readers stay primary. The experimental browser provider is disabled after ending early on this device/runtime.";
   }
 
-  return "Keyboard shortcuts and screen readers stay primary. Voice commands stay experimental.";
+  return "Keyboard shortcuts and screen readers stay primary. Current voice support uses the experimental browser provider, not a bundled local recognizer.";
+}
+
+export function buildVoiceCommandButtonLabel(options: {
+  capabilityState: VoiceCommandCapabilityState;
+  isListening: boolean;
+}) {
+  if (options.isListening) {
+    return "Stop listening";
+  }
+
+  if (options.capabilityState === "unsupported") {
+    return "Voice commands unavailable";
+  }
+
+  if (options.capabilityState === "unreliable") {
+    return "Voice commands unreliable";
+  }
+
+  return "Listen for one command";
 }

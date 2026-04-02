@@ -1482,7 +1482,7 @@ select:disabled {
 }
 
 .playback-voice-note {
-  max-width: 34ch;
+  max-width: 40ch;
   font-size: 0.84rem;
   color: #abcabf;
 }
@@ -1687,7 +1687,7 @@ select:disabled {
 
 .reader-voice-command-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
   gap: 0.24rem 0.72rem;
   font-size: 0.9rem;
 }

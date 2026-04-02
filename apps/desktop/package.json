@@ -15,7 +15,7 @@
     "release:win:all": "npm run release:win && npm run release:win:installer",
     "start": "electron dist-electron/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
-    "test": "tsc -p tsconfig.tests.json && node test-dist/readerControls.test.js && node test-dist/readerNavigation.test.js && node test-dist/documentWorkflow.test.js && node test-dist/runtimeDiagnostics.test.js && node test-dist/speechVoices.test.js && node test-dist/voiceCommands.test.js && node test-dist/readerLayout.test.js"
+    "test": "tsc -p tsconfig.tests.json && node test-dist/readerControls.test.js && node test-dist/readerNavigation.test.js && node test-dist/documentWorkflow.test.js && node test-dist/runtimeDiagnostics.test.js && node test-dist/speechVoices.test.js && node test-dist/voiceCommandGrammar.test.js && node test-dist/voiceCommandProvider.test.js && node test-dist/voiceCommands.test.js && node test-dist/readerLayout.test.js"
   },
   "dependencies": {
     "pdfjs-dist": "^5.5.207",
