@@ -1,4 +1,6 @@
 import type { SpeechVoicePreference } from "./speechVoices.js";
+import { defaultReaderWakePhraseOption, parseReaderWakePhraseOption, type ReaderVoiceMode, type ReaderWakePhraseOption } from "./readerVoiceMode.js";
+import type { LocalVoiceCommandPathPreference } from "./voiceCommandPaths.js";
 
 export type InterfaceTextScale = "default" | "large" | "largest";
 export type ReaderTextScale = "default" | "large" | "largest";
@@ -49,6 +51,12 @@ export type ReaderPersistenceState = {
   contrastMode: ContrastMode;
   speechVoicePreference: SpeechVoicePreference;
   preferredVoiceId: string | null;
+  preferredReaderVoiceMode: ReaderVoiceMode;
+  preferredReaderWakePhrase: ReaderWakePhraseOption;
+  preferredLocalVoiceCommandPath: LocalVoiceCommandPathPreference;
+  preferredLocalVoiceInputDeviceId: string | null;
+  testedLocalVoiceInputDeviceId: string | null;
+  testedLocalVoiceInputDeviceLabel: string | null;
   lastOpenedDocumentPath: string | null;
   lastOpenedParagraphIndex: number;
   hasSeenOnboarding: boolean;
@@ -82,6 +90,12 @@ export const defaultReaderPersistenceState: ReaderPersistenceState = {
   contrastMode: "default",
   speechVoicePreference: "automatic",
   preferredVoiceId: null,
+  preferredReaderVoiceMode: "pressToListen",
+  preferredReaderWakePhrase: defaultReaderWakePhraseOption,
+  preferredLocalVoiceCommandPath: "baseline",
+  preferredLocalVoiceInputDeviceId: null,
+  testedLocalVoiceInputDeviceId: null,
+  testedLocalVoiceInputDeviceLabel: null,
   lastOpenedDocumentPath: null,
   lastOpenedParagraphIndex: 0,
   hasSeenOnboarding: false
@@ -568,6 +582,25 @@ export function parseReaderPersistenceState(rawValue: string | null): ReaderPers
           ? parsed.preferredVoiceId
           : typeof parsed.preferredVoiceURI === "string" && parsed.preferredVoiceURI.trim().length > 0
             ? parsed.preferredVoiceURI
+          : null,
+      preferredReaderVoiceMode: parsed.preferredReaderVoiceMode === "off" ? "off" : "pressToListen",
+      preferredReaderWakePhrase: parseReaderWakePhraseOption(parsed.preferredReaderWakePhrase),
+      preferredLocalVoiceCommandPath:
+        parsed.preferredLocalVoiceCommandPath === "experimentalV2" ? "experimentalV2" : "baseline",
+      preferredLocalVoiceInputDeviceId:
+        typeof parsed.preferredLocalVoiceInputDeviceId === "string" &&
+        parsed.preferredLocalVoiceInputDeviceId.trim().length > 0
+          ? parsed.preferredLocalVoiceInputDeviceId
+          : null,
+      testedLocalVoiceInputDeviceId:
+        typeof parsed.testedLocalVoiceInputDeviceId === "string" &&
+        parsed.testedLocalVoiceInputDeviceId.trim().length > 0
+          ? parsed.testedLocalVoiceInputDeviceId
+          : null,
+      testedLocalVoiceInputDeviceLabel:
+        typeof parsed.testedLocalVoiceInputDeviceLabel === "string" &&
+        parsed.testedLocalVoiceInputDeviceLabel.trim().length > 0
+          ? parsed.testedLocalVoiceInputDeviceLabel
           : null,
       lastOpenedDocumentPath:
         typeof parsed.lastOpenedDocumentPath === "string" && parsed.lastOpenedDocumentPath.trim().length > 0

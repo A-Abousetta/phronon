@@ -72,22 +72,74 @@ import {
   type SpeechVoicePreference
 } from "./speechVoices";
 import {
+  buildVoiceCommandHelpMessage,
   buildInitialVoiceCommandStatus,
   buildVoiceCommandButtonLabel,
   buildVoiceCommandStatusMessage,
-  buildVoiceCommandSupportMessage,
   type VoiceCommandStatus
 } from "./voiceCommands";
 import {
-  experimentalBrowserVoiceCommandProvider,
-  type VoiceCommandCapabilityState
+  buildLocalVoiceInputBadgeLabels,
+  buildLocalVoiceInputOptionKey,
+  buildLocalVoiceInputOptionLabel,
+  buildLocalVoiceInputPreviewMeta,
+  buildLocalVoiceInputSummaryLabel,
+  buildLocalVoiceInputDeviceMeta,
+  buildLocalVoiceMicrophoneStatusMessage,
+  buildLocalVoiceMicrophoneTestStatusMessage,
+  buildRecommendedLocalVoiceInputDevices,
+  buildMissingLocalVoiceInputOptionLabel,
+  buildReaderLocalVoiceMicrophoneStatusMessage,
+  clampLocalVoiceMicrophoneMeterPercent,
+  formatLocalVoiceRms,
+  type LocalVoiceMicrophoneStatus,
+  type LocalVoiceMicrophoneTestResult,
+  type LocalVoiceMicrophoneTestSnapshot
+} from "./localVoiceInput";
+import {
+  resolvePreferredVoiceCommandProvider,
+  listenWithLocalVoiceCommandV2Service,
+  type VoiceCommandProviderResult,
+  type VoiceCommandCapability,
+  type VoiceCommandProvider
 } from "./voiceCommandProvider";
 import {
-  getVoiceReaderCommandMatchFromAlternatives,
+  createHandsFreeVoiceState,
+  getReaderWakePhraseGrammarPhrases,
+  getReaderWakePhraseLabel,
+  readerHandsFreeCommandSilenceTimeoutMs,
+  readerHandsFreeCommandTimeoutMs,
+  readerHandsFreeCooldownMs,
+  readerHandsFreePlaybackSuspendMessage,
+  reduceHandsFreeVoiceState,
+  resolveReaderVoiceMode,
+  type HandsFreeVoiceState,
+  type ReaderVoiceMode,
+  type ReaderWakePhraseOption
+} from "./readerVoiceMode";
+import {
+  parseVoiceReaderCommandAlternatives,
+  readerVoiceCommandPhrases,
   readerVoiceCommandLabels,
-  type VoiceReaderCommand
+  type VoiceReaderCommand,
+  type VoiceReaderCommandMatch,
+  type VoiceReaderCommandRejection
 } from "./voiceCommandGrammar";
 import { buildRuntimeDiagnosticsItems, type RuntimeSupportStatus } from "./runtimeDiagnostics";
+import {
+  buildLocalVoiceCommandPathOptionDescription,
+  getLocalVoiceCommandPathLabel,
+  resolveSelectedLocalVoiceCommandPath,
+  type LocalVoiceCommandPathPreference
+} from "./voiceCommandPaths";
+import {
+  emptyVoiceCommandTelemetryState,
+  formatVoiceCommandLatency,
+  recordVoiceCommandAttempt,
+  summarizeVoiceCommandTelemetry,
+  type VoiceCommandAttemptOutcome,
+  type VoiceCommandTelemetryState
+} from "./voiceCommandTelemetry";
 import {
   buildReaderBookmarkHintMessage,
   buildReaderDocumentReturnAnnouncement,
@@ -166,6 +218,30 @@ type LoadDocumentOptions = {
   navigateToReader?: boolean;
   restoreParagraphIndex?: number;
   origin?: DocumentLoadOrigin;
+};
+
+type HandsFreeWakeDiagnostics = {
+  streamOpened: boolean;
+  activeDeviceId: string | null;
+  activeDeviceName: string | null;
+  wakeDetectorActive: boolean;
+  lastRms: number | null;
+  peakRms: number | null;
+  lastWakeCandidate: string | null;
+  lastWakeResult: string | null;
+  lastWakeConfidenceResult: string | null;
+  lastPartialTranscriptCandidate: string | null;
+  lastFinalTranscriptCandidate: string | null;
+  reasonWakeDidNotFire: string | null;
+};
+
+type HandsFreeWakeSessionSnapshot = {
+  sessionId: string;
+  state: "initializing" | "microphoneAttached" | "wakeListening" | "wakePhraseDetected" | "streamFailure";
+  detail: string;
+  microphone: LocalVoiceMicrophoneStatus | null;
+  diagnostics: HandsFreeWakeDiagnostics;
+  updatedAt: number;
 };
 
 type ActiveDocumentLoad = {
@@ -807,8 +883,28 @@ function ReaderScreen(props: {
   onPlaybackRateChange: (nextRate: number) => void;
   speechVoicePreference: SpeechVoicePreference;
   preferredVoiceId: string | null;
+  preferredReaderVoiceMode: ReaderVoiceMode;
+  preferredReaderWakePhrase: ReaderWakePhraseOption;
+  preferredLocalVoiceCommandPath: LocalVoiceCommandPathPreference;
+  preferredLocalVoiceInputDeviceId: string | null;
+  runtimeSupportStatus: RuntimeSupportStatus | null;
   focusRequest: number;
   onAnnounce: (message: string) => void;
+  onVoiceCommandAttempt: (attempt: {
+    providerId: string;
+    providerLabel: string;
+    preferredPath: LocalVoiceCommandPathPreference;
+    activePath: LocalVoiceCommandPathPreference;
+    outcome: VoiceCommandAttemptOutcome;
+    heardText: string | null;
+    matchedCommand: VoiceReaderCommand | null;
+    recordedAt: number;
+    pressToServiceReadyLatencyMs: number | null;
+    pressToMicActiveLatencyMs: number | null;
+    speechOnsetLatencyMs: number | null;
+    transcriptReadyLatencyMs: number | null;
+    matchLatencyMs: number | null;
+  }) => void;
 }) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
   const [playbackMessage, setPlaybackMessage] = useState("Load a .txt or .pdf file to start playback.");
@@ -822,14 +918,54 @@ function ReaderScreen(props: {
   const [selectedTextRange, setSelectedTextRange] = useState<ReaderTextSelection | null>(null);
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const [voiceCommandCapabilityState, setVoiceCommandCapabilityState] = useState<VoiceCommandCapabilityState>(() => {
-    return experimentalBrowserVoiceCommandProvider.getCapability(window).state;
+  const [activeVoiceCommandProvider, setActiveVoiceCommandProvider] = useState<VoiceCommandProvider>(() => {
+    return resolvePreferredVoiceCommandProvider({
+      windowObject: window,
+      runtimeSupportStatus: props.runtimeSupportStatus,
+      preferredLocalVoiceCommandPath: props.preferredLocalVoiceCommandPath
+    }).provider;
+  });
+  const [voiceCommandCapability, setVoiceCommandCapability] = useState<VoiceCommandCapability>(() => {
+    return resolvePreferredVoiceCommandProvider({
+      windowObject: window,
+      runtimeSupportStatus: props.runtimeSupportStatus,
+      preferredLocalVoiceCommandPath: props.preferredLocalVoiceCommandPath
+    }).capability;
   });
   const [voiceCommandStatus, setVoiceCommandStatus] = useState<VoiceCommandStatus>(() => {
-    return buildInitialVoiceCommandStatus(experimentalBrowserVoiceCommandProvider.getCapability(window).state);
+    return buildInitialVoiceCommandStatus(
+      resolvePreferredVoiceCommandProvider({
+        windowObject: window,
+        runtimeSupportStatus: props.runtimeSupportStatus,
+        preferredLocalVoiceCommandPath: props.preferredLocalVoiceCommandPath
+      }).capability.state
+    );
   });
+  const readerVoiceModeResolution = useMemo(
+    () =>
+      resolveReaderVoiceMode({
+        preferredMode: props.preferredReaderVoiceMode,
+        runtimeSupportStatus: props.runtimeSupportStatus
+      }),
+    [props.preferredReaderVoiceMode, props.runtimeSupportStatus]
+  );
+  const [handsFreeVoiceState, setHandsFreeVoiceState] = useState<HandsFreeVoiceState>(() =>
+    createHandsFreeVoiceState(readerVoiceModeResolution)
+  );
+  const [handsFreeRuntimeFallbackDetail, setHandsFreeRuntimeFallbackDetail] = useState<string | null>(null);
+  const [handsFreeWakeDiagnostics, setHandsFreeWakeDiagnostics] = useState<HandsFreeWakeDiagnostics | null>(null);
+  const [localVoiceMicrophoneStatus, setLocalVoiceMicrophoneStatus] = useState<LocalVoiceMicrophoneStatus | null>(
+    props.runtimeSupportStatus?.voiceCommandSupport.microphone ?? null
+  );
   const voiceCommandAbortControllerRef = useRef<AbortController | null>(null);
+  const handsFreeLoopAbortControllerRef = useRef<AbortController | null>(null);
+  const handsFreeWakeSessionIdRef = useRef<string | null>(null);
+  const handsFreeWakePhaseRef = useRef<HandsFreeWakeSessionSnapshot["state"] | null>(null);
   const voiceCommandRequestIdRef = useRef(0);
+  const voiceCommandAttemptStartedAtRef = useRef<number | null>(null);
+  const voiceCommandMicActiveLatencyRef = useRef<number | null>(null);
+  const voiceCommandReadyCueRequestIdRef = useRef<number | null>(null);
+  const voiceCommandReadyCueAudioContextRef = useRef<AudioContext | null>(null);
   const paragraphRefs = useRef<Array<HTMLElement | null>>([]);
   const paragraphBodyRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const searchMatchRefs = useRef<Array<HTMLSpanElement | null>>([]);
@@ -902,11 +1038,33 @@ function ReaderScreen(props: {
   const hasText = Boolean(props.documentState.text?.trim());
   const speechSynthesisAvailable = "speechSynthesis" in window;
   const isFilePickerLoading = props.activeLoad?.origin === "filePicker";
+  const activeLocalVoicePath = resolveSelectedLocalVoiceCommandPath({
+    preference: props.preferredLocalVoiceCommandPath,
+    support: props.runtimeSupportStatus?.voiceCommandSupport ?? null
+  });
+  const experimentalHandsFreeEnabled = readerVoiceModeResolution.experimentalHandsFreeEnabled;
+  const readerHandsFreeWakePhraseLabel = getReaderWakePhraseLabel(props.preferredReaderWakePhrase);
+  const readerHandsFreeWakeGrammarPhrases = getReaderWakePhraseGrammarPhrases(props.preferredReaderWakePhrase);
+  const effectiveReaderVoiceMode =
+    props.preferredReaderVoiceMode === "handsFreeWakePhrase" && handsFreeRuntimeFallbackDetail
+      ? "pressToListen"
+      : readerVoiceModeResolution.effectiveMode;
   const isListeningForVoiceCommand =
-    voiceCommandStatus.state === "starting" || voiceCommandStatus.state === "listening";
+    voiceCommandStatus.state === "starting" ||
+    voiceCommandStatus.state === "serviceReady" ||
+    voiceCommandStatus.state === "microphoneActive" ||
+    voiceCommandStatus.state === "waitingForSpeech" ||
+    voiceCommandStatus.state === "speechDetected" ||
+    voiceCommandStatus.state === "postSpeechSilence" ||
+    voiceCommandStatus.state === "listening";
+  const voiceCommandCapabilityState = voiceCommandCapability.state;
+  const shouldShowManualVoiceButton = effectiveReaderVoiceMode === "pressToListen";
+  const isHandsFreeVoiceMode = effectiveReaderVoiceMode === "handsFreeWakePhrase";
+  const isVoiceModeOff = props.preferredReaderVoiceMode === "off";
+  const isHandsFreeCommandWindowActive = handsFreeVoiceState.readyForCommand;
   const voiceCommandInteractionDisabled =
     !isListeningForVoiceCommand &&
-    (voiceCommandCapabilityState === "unsupported" || voiceCommandCapabilityState === "unreliable");
+    (voiceCommandCapabilityState === "unsupported" || voiceCommandCapabilityState === "unreliable" || !shouldShowManualVoiceButton);
   const activeSearchMatch =
     activeSearchMatchIndex >= 0 && activeSearchMatchIndex < searchMatches.length
       ? searchMatches[activeSearchMatchIndex]
@@ -922,17 +1080,41 @@ function ReaderScreen(props: {
       }).length,
     [savedStudyPoints, searchMatchesByParagraph]
   );
-  const voiceCommandStatusMessage = buildVoiceCommandStatusMessage({
-    capabilityState: voiceCommandCapabilityState,
+  const baseVoiceCommandStatusMessage = buildVoiceCommandStatusMessage({
+    capability: voiceCommandCapability,
+    localSupport: props.runtimeSupportStatus?.voiceCommandSupport ?? null,
     status: voiceCommandStatus
   });
-  const voiceCommandSupportMessage = buildVoiceCommandSupportMessage({
-    capabilityState: voiceCommandCapabilityState
-  });
-  const voiceCommandButtonLabel = buildVoiceCommandButtonLabel({
-    capabilityState: voiceCommandCapabilityState,
+  const manualVoiceCommandButtonLabel = buildVoiceCommandButtonLabel({
+    capability: voiceCommandCapability,
+    localSupport: props.runtimeSupportStatus?.voiceCommandSupport ?? null,
     isListening: isListeningForVoiceCommand
   });
+  const baseVoiceCommandHelpMessage = buildVoiceCommandHelpMessage({
+    capability: voiceCommandCapability,
+    localSupport: props.runtimeSupportStatus?.voiceCommandSupport ?? null
+  });
+  const voiceCommandStatusMessage = isVoiceModeOff
+    ? "Voice mode is off. Turn on press to listen in Settings."
+    : props.preferredReaderVoiceMode === "handsFreeWakePhrase" &&
+        voiceCommandStatus.state === "availableToTry" &&
+        (handsFreeRuntimeFallbackDetail || readerVoiceModeResolution.fellBackToPressToListen)
+      ? handsFreeRuntimeFallbackDetail ?? readerVoiceModeResolution.detail ?? baseVoiceCommandStatusMessage
+      : baseVoiceCommandStatusMessage;
+  const voiceControlSupportMessage = isVoiceModeOff
+    ? "Keyboard shortcuts and screen readers stay primary while voice mode is off."
+    : "Manual voice only. Press to listen, say one supported Reader command, and return to reading.";
+  const voiceCommandHelpMessage = isVoiceModeOff
+    ? "Voice control is off."
+    : isHandsFreeVoiceMode
+      ? `Experimental hands-free mode. Say "${readerHandsFreeWakePhraseLabel}", wait for the ready earcon, then say one supported Reader command within about ${Math.round(
+          readerHandsFreeCommandTimeoutMs / 1000
+        )} seconds.`
+      : "Press `Press to listen`, say one supported Reader command, and wait for Phronon to match it locally.";
+  const readerLocalVoiceMicrophoneMessage =
+    voiceCommandCapability.bundledLocalRecognizer || props.runtimeSupportStatus?.voiceCommandSupport.state === "ready"
+      ? buildReaderLocalVoiceMicrophoneStatusMessage(localVoiceMicrophoneStatus)
+      : null;
   const searchStatusMessage = buildReaderSearchStatusMessage({
     isLoading: props.documentState.isLoading,
     hasText,
@@ -943,6 +1125,84 @@ function ReaderScreen(props: {
   });
   const activeReaderRegionLabel =
     readerRegionDefinitions.find((definition) => definition.id === activeReaderRegion)?.label ?? "Document";
+
+  useEffect(() => {
+    const nextSelection = resolvePreferredVoiceCommandProvider({
+      windowObject: window,
+      runtimeSupportStatus: props.runtimeSupportStatus,
+      preferredLocalVoiceCommandPath: props.preferredLocalVoiceCommandPath
+    });
+
+    setActiveVoiceCommandProvider(nextSelection.provider);
+    setVoiceCommandCapability(nextSelection.capability);
+    setLocalVoiceMicrophoneStatus((currentStatus) => {
+      if (
+        props.preferredReaderVoiceMode === "handsFreeWakePhrase" &&
+        currentStatus?.activeDevice &&
+        handsFreeWakeDiagnostics?.streamOpened
+      ) {
+        return currentStatus;
+      }
+
+      return props.runtimeSupportStatus?.voiceCommandSupport.microphone ?? null;
+    });
+    setVoiceCommandStatus((currentStatus) => {
+      if (
+        currentStatus.state === "starting" ||
+        currentStatus.state === "serviceReady" ||
+        currentStatus.state === "microphoneActive" ||
+        currentStatus.state === "waitingForSpeech" ||
+        currentStatus.state === "speechDetected" ||
+        currentStatus.state === "postSpeechSilence" ||
+        currentStatus.state === "listening"
+      ) {
+        return currentStatus;
+      }
+
+      return buildInitialVoiceCommandStatus(nextSelection.capability.state);
+    });
+  }, [handsFreeWakeDiagnostics?.streamOpened, props.preferredLocalVoiceCommandPath, props.preferredReaderVoiceMode, props.runtimeSupportStatus]);
+
+  useEffect(() => {
+    if (props.preferredReaderVoiceMode !== "pressToListen") {
+      voiceCommandRequestIdRef.current += 1;
+      voiceCommandAbortControllerRef.current?.abort();
+      voiceCommandAbortControllerRef.current = null;
+    }
+
+    setHandsFreeRuntimeFallbackDetail(null);
+    setHandsFreeWakeDiagnostics(null);
+    handsFreeWakePhaseRef.current = null;
+    setHandsFreeVoiceState((currentState) =>
+      reduceHandsFreeVoiceState(currentState, {
+        type: "modeResolved",
+        resolution: readerVoiceModeResolution
+      })
+    );
+
+    if (props.preferredReaderVoiceMode === "off") {
+      setVoiceCommandStatus({
+        state: "availableToTry",
+        detail: "Voice mode is off. Turn on press to listen in Settings."
+      });
+      return;
+    }
+
+    if (readerVoiceModeResolution.fellBackToPressToListen && readerVoiceModeResolution.detail) {
+      setVoiceCommandStatus({
+        state: "availableToTry",
+        detail: readerVoiceModeResolution.detail
+      });
+      return;
+    }
+
+    if (props.preferredReaderVoiceMode === "handsFreeWakePhrase") {
+      setVoiceCommandStatus({
+        state: "availableToTry",
+        detail: `Hands-free wake listening. Say "${readerHandsFreeWakePhraseLabel}".`
+      });
+    }
+  }, [props.preferredReaderVoiceMode, readerVoiceModeResolution]);
 
   function resolveReaderRegionLabel(region: ReaderRegionId) {
     return readerRegionDefinitions.find((definition) => definition.id === region)?.label ?? "Document";
@@ -1044,6 +1304,203 @@ function ReaderScreen(props: {
     }
 
     console.info("[Reader voice command]", eventName, details ?? {});
+  }
+
+  function isVoiceCommandMicReadyState(state: VoiceCommandStatus["state"]) {
+    return state === "microphoneActive" || state === "waitingForSpeech" || state === "listening";
+  }
+
+  async function playVoiceCommandEarcon(kind: "ready" | "success" | "failure") {
+    const AudioContextConstructor =
+      window.AudioContext ??
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+    if (!AudioContextConstructor) {
+      return;
+    }
+
+    const audioContext =
+      voiceCommandReadyCueAudioContextRef.current ?? new AudioContextConstructor();
+    voiceCommandReadyCueAudioContextRef.current = audioContext;
+
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    const now = audioContext.currentTime;
+    const noteByKind: Record<"ready" | "success" | "failure", Array<{ at: number; duration: number; frequency: number }>> =
+      {
+        ready: [{ at: 0, duration: 0.08, frequency: 880 }],
+        success: [
+          { at: 0, duration: 0.06, frequency: 740 },
+          { at: 0.09, duration: 0.08, frequency: 988 }
+        ],
+        failure: [
+          { at: 0, duration: 0.08, frequency: 330 },
+          { at: 0.1, duration: 0.11, frequency: 220 }
+        ]
+      };
+
+    noteByKind[kind].forEach((note) => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      const startAt = now + note.at;
+      const endAt = startAt + note.duration;
+
+      oscillator.type = kind === "failure" ? "triangle" : "sine";
+      oscillator.frequency.setValueAtTime(note.frequency, startAt);
+      gainNode.gain.setValueAtTime(0.0001, startAt);
+      gainNode.gain.exponentialRampToValueAtTime(kind === "ready" ? 0.045 : 0.04, startAt + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, endAt);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start(startAt);
+      oscillator.stop(endAt);
+    });
+  }
+
+  function buildVoiceCommandMatchStatusDetail(match: VoiceReaderCommandMatch) {
+    const heardText = match.heardTranscript || match.normalizedTranscript || "speech";
+
+    switch (match.command) {
+      case "play":
+        return `Heard "${heardText}". Starting playback.`;
+      case "pause":
+        return `Heard "${heardText}". Pausing playback.`;
+      case "stop":
+        return `Heard "${heardText}". Stopping playback.`;
+      case "nextParagraph":
+        return `Heard "${heardText}". Moving to the next paragraph.`;
+      case "previousParagraph":
+        return `Heard "${heardText}". Moving to the previous paragraph.`;
+      case "repeatParagraph":
+        return `Heard "${heardText}". Repeating the current paragraph.`;
+      case "faster":
+        return `Heard "${heardText}". Increasing playback speed.`;
+      case "slower":
+        return `Heard "${heardText}". Decreasing playback speed.`;
+      case "jumpToDocument":
+        return `Heard "${heardText}". Moving focus to the document.`;
+      case "jumpToPlayback":
+        return `Heard "${heardText}". Moving focus to playback.`;
+      case "jumpToSearch":
+        return `Heard "${heardText}". Moving focus to search.`;
+      case "jumpToHighlights":
+        return `Heard "${heardText}". Moving focus to highlights.`;
+      case "jumpToBookmarks":
+        return `Heard "${heardText}". Moving focus to bookmarks.`;
+      case "jumpToHelp":
+        return `Heard "${heardText}". Moving focus to shortcuts.`;
+      case "openFile":
+        return `Heard "${heardText}". Opening the file picker.`;
+    }
+  }
+
+  function buildVoiceCommandRejectedStatusDetail(rejection: VoiceReaderCommandRejection) {
+    switch (rejection.reason) {
+      case "multiplePossibleMatches":
+        return `Heard "${rejection.heardTranscript || rejection.normalizedTranscript || "speech"}". ${rejection.detail} Say the full command.`;
+      case "commandRequiresFullerPhrase":
+        return `Heard "${rejection.heardTranscript || rejection.normalizedTranscript || "speech"}". ${rejection.detail}`;
+      case "noSupportedCommandMatched":
+      default:
+        return rejection.heardTranscript
+          ? `Heard "${rejection.heardTranscript}", but it did not match a supported Reader command.`
+          : "Heard speech, but it did not match a supported Reader command.";
+    }
+  }
+
+  function reportVoiceCommandAttempt(options: {
+    outcome: VoiceCommandAttemptOutcome;
+    result: VoiceCommandProviderResult;
+    matchedCommand?: VoiceReaderCommand | null;
+    providerOverride?: {
+      providerId: string;
+      providerLabel: string;
+      preferredPath: LocalVoiceCommandPathPreference;
+      activePath: LocalVoiceCommandPathPreference;
+    };
+  }) {
+    const startedAt = voiceCommandAttemptStartedAtRef.current;
+    const now = performance.now();
+    const transcriptReadyLatencyMs =
+      options.result.metrics?.transcriptReadyLatencyMs ??
+      options.result.metrics?.transcriptLatencyMs ??
+      (options.result.kind === "heardSpeech" && startedAt !== null ? Math.max(0, Math.round(now - startedAt)) : null);
+    const matchLatencyMs =
+      options.result.metrics?.matchLatencyMs ??
+      (options.outcome === "matched" && startedAt !== null ? Math.max(0, Math.round(now - startedAt)) : null);
+    const pressToServiceReadyLatencyMs = options.result.metrics?.serviceReadyLatencyMs ?? null;
+    const pressToMicActiveLatencyMs =
+      options.result.metrics?.microphoneActiveLatencyMs ??
+      options.result.metrics?.audioOpenLatencyMs ??
+      voiceCommandMicActiveLatencyRef.current;
+    const speechOnsetLatencyMs =
+      options.result.metrics?.speechOnsetLatencyMs ??
+      options.result.metrics?.speechStartLatencyMs ??
+      null;
+
+    props.onVoiceCommandAttempt({
+      providerId: options.providerOverride?.providerId ?? voiceCommandCapability.providerId,
+      providerLabel: options.providerOverride?.providerLabel ?? voiceCommandCapability.providerLabel,
+      preferredPath: options.providerOverride?.preferredPath ?? props.preferredLocalVoiceCommandPath,
+      activePath: options.providerOverride?.activePath ?? activeLocalVoicePath.path,
+      outcome: options.outcome,
+      heardText: options.result.kind === "heardSpeech" ? options.result.heardText : null,
+      matchedCommand: options.matchedCommand ?? null,
+      recordedAt: Date.now(),
+      pressToServiceReadyLatencyMs,
+      pressToMicActiveLatencyMs,
+      speechOnsetLatencyMs,
+      transcriptReadyLatencyMs,
+      matchLatencyMs
+    });
+
+    voiceCommandAttemptStartedAtRef.current = null;
+    voiceCommandMicActiveLatencyRef.current = null;
+  }
+
+  function markVoiceCommandMicReady(requestId: number) {
+    if (
+      voiceCommandMicActiveLatencyRef.current === null &&
+      voiceCommandAttemptStartedAtRef.current !== null
+    ) {
+      voiceCommandMicActiveLatencyRef.current = Math.max(
+        0,
+        Math.round(performance.now() - voiceCommandAttemptStartedAtRef.current)
+      );
+    }
+
+    if (voiceCommandReadyCueRequestIdRef.current === requestId) {
+      return;
+    }
+
+    voiceCommandReadyCueRequestIdRef.current = requestId;
+    void playVoiceCommandEarcon("ready").catch(() => {
+      // The live status message remains the fallback if audio playback is unavailable.
+    });
+  }
+
+  async function waitForVoiceDelay(delayMs: number, signal?: AbortSignal) {
+    if (signal?.aborted) {
+      return false;
+    }
+
+    return await new Promise<boolean>((resolve) => {
+      const timer = window.setTimeout(() => {
+        signal?.removeEventListener("abort", handleAbort);
+        resolve(true);
+      }, delayMs);
+
+      const handleAbort = () => {
+        window.clearTimeout(timer);
+        resolve(false);
+      };
+
+      signal?.addEventListener("abort", handleAbort, {
+        once: true
+      });
+    });
   }
 
   function renderParagraphText(paragraph: string, paragraphIndex: number) {
@@ -1282,11 +1739,16 @@ function ReaderScreen(props: {
       voiceCommandRequestIdRef.current += 1;
       voiceCommandAbortControllerRef.current?.abort();
       voiceCommandAbortControllerRef.current = null;
+      handsFreeLoopAbortControllerRef.current?.abort();
+      handsFreeLoopAbortControllerRef.current = null;
+      voiceCommandReadyCueRequestIdRef.current = null;
       playbackSessionRef.current += 1;
       playbackRangeRef.current = null;
       playbackPositionRef.current = null;
       utteranceRef.current = null;
       restartPausedParagraphRef.current = false;
+      void voiceCommandReadyCueAudioContextRef.current?.close();
+      voiceCommandReadyCueAudioContextRef.current = null;
 
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
@@ -1606,6 +2068,10 @@ function ReaderScreen(props: {
   }
 
   async function handleListenForVoiceCommand() {
+    if (effectiveReaderVoiceMode !== "pressToListen") {
+      return;
+    }
+
     if (isListeningForVoiceCommand) {
       voiceCommandRequestIdRef.current += 1;
       voiceCommandAbortControllerRef.current?.abort();
@@ -1630,21 +2096,34 @@ function ReaderScreen(props: {
     const abortController = new AbortController();
     voiceCommandRequestIdRef.current = requestId;
     voiceCommandAbortControllerRef.current = abortController;
+    voiceCommandAttemptStartedAtRef.current = performance.now();
+    voiceCommandMicActiveLatencyRef.current = null;
+    voiceCommandReadyCueRequestIdRef.current = null;
     setVoiceCommandStatus({
       state: "starting"
     });
 
-    const result = await experimentalBrowserVoiceCommandProvider.listenOnce({
+    const result = await activeVoiceCommandProvider.listenOnce({
       windowObject: window,
       navigatorObject: navigator,
       signal: abortController.signal,
-      onStateChange: (state) => {
+      preferredInputDeviceId: props.preferredLocalVoiceInputDeviceId,
+      onStateChange: (update) => {
         if (voiceCommandRequestIdRef.current !== requestId) {
           return;
         }
 
+        if (update.microphone) {
+          setLocalVoiceMicrophoneStatus(update.microphone);
+        }
+
+        if (isVoiceCommandMicReadyState(update.state)) {
+          markVoiceCommandMicReady(requestId);
+        }
+
         setVoiceCommandStatus({
-          state
+          state: update.state,
+          detail: update.detail
         });
       },
       onDiagnostic: logVoiceCommandDiagnostic
@@ -1663,65 +2142,631 @@ function ReaderScreen(props: {
       result
     });
 
+    if ("microphone" in result && result.microphone) {
+      setLocalVoiceMicrophoneStatus(result.microphone);
+    }
+
     switch (result.kind) {
       case "unsupported":
-        setVoiceCommandCapabilityState("unsupported");
+        setVoiceCommandCapability((currentCapability) => ({
+          ...currentCapability,
+          state: "unsupported",
+          detail: result.detail
+        }));
         setVoiceCommandStatus({
           state: "unsupported",
           detail: result.detail
         });
+        reportVoiceCommandAttempt({
+          outcome: "unsupported",
+          result
+        });
         return;
       case "permissionDenied":
-        setVoiceCommandCapabilityState("availableToTry");
+        setVoiceCommandCapability((currentCapability) => ({
+          ...currentCapability,
+          state: "availableToTry"
+        }));
         setVoiceCommandStatus({
           state: "permissionDenied",
           detail: result.detail
         });
+        reportVoiceCommandAttempt({
+          outcome: "permissionDenied",
+          result
+        });
         return;
       case "heardNothing":
-        setVoiceCommandCapabilityState("availableToTry");
+        setVoiceCommandCapability((currentCapability) => ({
+          ...currentCapability,
+          state: "availableToTry"
+        }));
         setVoiceCommandStatus({
-          state: "heardNothing",
-          detail: `${result.detail} Try again closer to the microphone, or keep using keyboard shortcuts.`
+          state: result.microphone?.signalDetected === false ? "noSignalDetected" : "speechUnclear",
+          detail:
+            result.microphone?.signalDetected === false
+              ? `${result.detail} Check the selected microphone or move closer before trying again.`
+              : `${result.detail} The microphone was active, but the speech was unclear.`
+        });
+        void playVoiceCommandEarcon("failure").catch(() => {});
+        reportVoiceCommandAttempt({
+          outcome: "silence",
+          result,
+          providerOverride: {
+            providerId: "localVoskCommandV2",
+            providerLabel: "Experimental offline speech recognition (Vosk v2)",
+            preferredPath: "experimentalV2",
+            activePath: "experimentalV2"
+          }
         });
         return;
       case "runtimeEndedEarly":
-        setVoiceCommandCapabilityState("unreliable");
+        setVoiceCommandCapability((currentCapability) => ({
+          ...currentCapability,
+          state: "unreliable",
+          detail: result.detail
+        }));
         setVoiceCommandStatus({
           state: "runtimeEndedEarly",
           detail: result.detail
         });
+        reportVoiceCommandAttempt({
+          outcome: "runtimeEndedEarly",
+          result
+        });
         return;
       case "cancelled":
-        setVoiceCommandCapabilityState(result.capabilityState);
+        setVoiceCommandCapability((currentCapability) => ({
+          ...currentCapability,
+          state: result.capabilityState
+        }));
         setVoiceCommandStatus({
           state: result.capabilityState === "unreliable" ? "unreliable" : "availableToTry",
           detail: result.detail
         });
+        reportVoiceCommandAttempt({
+          outcome: "cancelled",
+          result
+        });
         return;
       case "heardSpeech": {
-        setVoiceCommandCapabilityState("availableToTry");
-        const match = getVoiceReaderCommandMatchFromAlternatives(result.transcripts);
+        setVoiceCommandCapability((currentCapability) => ({
+          ...currentCapability,
+          state: "availableToTry"
+        }));
+        const parsedVoiceCommand = parseVoiceReaderCommandAlternatives(
+          result.transcripts.length > 0 ? result.transcripts : result.heardText ? [result.heardText] : []
+        );
 
-        if (!match) {
+        logVoiceCommandDiagnostic("parser-result", {
+          requestId,
+          parsedVoiceCommand
+        });
+
+        if (!parsedVoiceCommand) {
           setVoiceCommandStatus({
-            state: "noSupportedCommandMatched",
-            detail: result.heardText
-              ? `Heard "${result.heardText}", but it is not one of the supported Reader commands below.`
-              : "Voice command heard speech, but no supported Reader command matched."
+            state: "heardSpeechNoMatch",
+            detail: "Heard speech, but it was not clear enough to match a supported Reader command."
+          });
+          void playVoiceCommandEarcon("failure").catch(() => {});
+          reportVoiceCommandAttempt({
+            outcome: "noMatch",
+            result,
+            providerOverride: {
+              providerId: "localVoskCommandV2",
+              providerLabel: "Experimental offline speech recognition (Vosk v2)",
+              preferredPath: "experimentalV2",
+              activePath: "experimentalV2"
+            }
+          });
+          return;
+        }
+
+        if (parsedVoiceCommand.kind === "rejected") {
+          setVoiceCommandStatus({
+            state:
+              parsedVoiceCommand.reason === "commandRequiresFullerPhrase" ||
+              parsedVoiceCommand.reason === "multiplePossibleMatches"
+                ? "commandNeedsFullerPhrase"
+                : "heardSpeechNoMatch",
+            detail: buildVoiceCommandRejectedStatusDetail(parsedVoiceCommand)
+          });
+          void playVoiceCommandEarcon("failure").catch(() => {});
+          reportVoiceCommandAttempt({
+            outcome: "noMatch",
+            result,
+            providerOverride: {
+              providerId: "localVoskCommandV2",
+              providerLabel: "Experimental offline speech recognition (Vosk v2)",
+              preferredPath: "experimentalV2",
+              activePath: "experimentalV2"
+            }
           });
           return;
         }
 
         setVoiceCommandStatus({
           state: "heardCommand",
-          detail: `Heard command: ${match.definition.label}.`
+          detail: buildVoiceCommandMatchStatusDetail(parsedVoiceCommand)
         });
-        executeVoiceReaderCommand(match.command);
+        void playVoiceCommandEarcon("success").catch(() => {});
+        reportVoiceCommandAttempt({
+          outcome: "matched",
+          result,
+          matchedCommand: parsedVoiceCommand.command,
+          providerOverride: {
+            providerId: "localVoskCommandV2",
+            providerLabel: "Experimental offline speech recognition (Vosk v2)",
+            preferredPath: "experimentalV2",
+            activePath: "experimentalV2"
+          }
+        });
+        executeVoiceReaderCommand(parsedVoiceCommand.command);
         return;
       }
     }
   }
+
+  function matchesHandsFreeWakePhrase(result: VoiceCommandProviderResult) {
+    return result.kind === "heardSpeech";
+  }
+
+  function applyHandsFreeWakeSnapshot(snapshot: HandsFreeWakeSessionSnapshot) {
+    setHandsFreeWakeDiagnostics(snapshot.diagnostics);
+
+    if (snapshot.microphone) {
+      setLocalVoiceMicrophoneStatus(snapshot.microphone);
+    }
+
+    if (handsFreeWakePhaseRef.current === snapshot.state) {
+      return;
+    }
+
+    handsFreeWakePhaseRef.current = snapshot.state;
+
+    switch (snapshot.state) {
+      case "initializing":
+        setVoiceCommandStatus({
+          state: "starting",
+          detail: "Hands-free initializing. Attaching the selected microphone for wake listening."
+        });
+        return;
+      case "microphoneAttached":
+        setVoiceCommandStatus({
+          state: "serviceReady",
+          detail:
+            snapshot.detail ||
+            `Wake stream active on "${snapshot.diagnostics.activeDeviceName ?? "the selected microphone"}".`
+        });
+        return;
+      case "wakeListening":
+        setHandsFreeVoiceState((currentState) =>
+          reduceHandsFreeVoiceState(currentState, {
+            type: "wakeSessionStarted"
+          })
+        );
+        setVoiceCommandStatus({
+          state: "availableToTry",
+          detail: `Hands-free wake listening. Say "${readerHandsFreeWakePhraseLabel}".`
+        });
+        return;
+      case "wakePhraseDetected":
+        setHandsFreeVoiceState((currentState) =>
+          reduceHandsFreeVoiceState(currentState, {
+            type: "wakePhraseDetected"
+          })
+        );
+        setVoiceCommandStatus({
+          state: "starting",
+          detail: "Wake phrase heard. Opening a short command window for one Reader command."
+        });
+        return;
+      case "streamFailure":
+        setVoiceCommandStatus({
+          state: "runtimeEndedEarly",
+          detail: snapshot.detail || "Hands-free wake listening lost its microphone stream."
+        });
+        return;
+    }
+  }
+
+  async function runHandsFreeCooldown(detail: string, signal: AbortSignal) {
+    setHandsFreeVoiceState((currentState) =>
+      reduceHandsFreeVoiceState(currentState, {
+        type: "commandWindowClosed"
+      })
+    );
+    setVoiceCommandStatus({
+      state: "availableToTry",
+      detail
+    });
+
+    const completedCooldown = await waitForVoiceDelay(readerHandsFreeCooldownMs, signal);
+
+    if (!completedCooldown || signal.aborted) {
+      return false;
+    }
+
+    setHandsFreeVoiceState((currentState) =>
+      reduceHandsFreeVoiceState(currentState, {
+        type: "cooldownElapsed"
+      })
+    );
+    return true;
+  }
+
+  async function runHandsFreeCommandWindow(loopRequestId: number, signal: AbortSignal) {
+    voiceCommandAttemptStartedAtRef.current = performance.now();
+    voiceCommandMicActiveLatencyRef.current = null;
+    voiceCommandReadyCueRequestIdRef.current = null;
+
+    const result = await listenWithLocalVoiceCommandV2Service({
+      windowObject: window,
+      signal,
+      preferredInputDeviceId: props.preferredLocalVoiceInputDeviceId,
+      grammarPhrases: readerVoiceCommandPhrases,
+      timeoutMs: readerHandsFreeCommandTimeoutMs,
+      silenceTimeoutMs: readerHandsFreeCommandSilenceTimeoutMs,
+      onStateChange: (update) => {
+        if (signal.aborted) {
+          return;
+        }
+
+        if (update.microphone) {
+          setLocalVoiceMicrophoneStatus(update.microphone);
+        }
+
+        if (isVoiceCommandMicReadyState(update.state)) {
+          markVoiceCommandMicReady(loopRequestId);
+          setHandsFreeVoiceState((currentState) =>
+            currentState.readyForCommand
+              ? currentState
+              : reduceHandsFreeVoiceState(currentState, {
+                  type: "commandWindowOpened"
+                })
+          );
+        }
+
+        setVoiceCommandStatus({
+          state: update.state,
+          detail: update.detail
+        });
+      },
+      onDiagnostic: logVoiceCommandDiagnostic
+    });
+
+    if (signal.aborted) {
+      return false;
+    }
+
+    if ("microphone" in result && result.microphone) {
+      setLocalVoiceMicrophoneStatus(result.microphone);
+    }
+
+    switch (result.kind) {
+      case "unsupported":
+      case "runtimeEndedEarly":
+        setHandsFreeRuntimeFallbackDetail(
+          `${result.detail} Hands-free stopped and Reader fell back to press to listen.`
+        );
+        setHandsFreeVoiceState((currentState) =>
+          reduceHandsFreeVoiceState(currentState, {
+            type: "modeResolved",
+            resolution: {
+              preferredMode: "handsFreeWakePhrase",
+              effectiveMode: "pressToListen",
+              handsFreeAvailable: false,
+              experimentalHandsFreeEnabled,
+              fellBackToPressToListen: true,
+              detail: `${result.detail} Hands-free stopped and Reader fell back to press to listen.`
+            }
+          })
+        );
+        setVoiceCommandStatus({
+          state: "availableToTry",
+          detail: `${result.detail} Hands-free stopped and Reader fell back to press to listen.`
+        });
+        return false;
+      case "cancelled":
+        return false;
+      case "permissionDenied":
+        setVoiceCommandStatus({
+          state: "permissionDenied",
+          detail: result.detail
+        });
+        void playVoiceCommandEarcon("failure").catch(() => {});
+        return false;
+      case "heardNothing": {
+        const detail =
+          result.microphone?.signalDetected === false
+            ? `${result.detail} Returning to wake listening.`
+            : "Command window timed out without a supported Reader command. Returning to wake listening.";
+        void playVoiceCommandEarcon("failure").catch(() => {});
+        reportVoiceCommandAttempt({
+          outcome: "silence",
+          result
+        });
+        return await runHandsFreeCooldown(detail, signal);
+      }
+      case "heardSpeech": {
+        const parsedVoiceCommand = parseVoiceReaderCommandAlternatives(
+          result.transcripts.length > 0 ? result.transcripts : result.heardText ? [result.heardText] : []
+        );
+
+        logVoiceCommandDiagnostic("hands-free-parser-result", {
+          loopRequestId,
+          parsedVoiceCommand
+        });
+
+        if (!parsedVoiceCommand) {
+          void playVoiceCommandEarcon("failure").catch(() => {});
+          reportVoiceCommandAttempt({
+            outcome: "noMatch",
+            result
+          });
+          return await runHandsFreeCooldown(
+            "Command window timed out without a supported Reader command. Returning to wake listening.",
+            signal
+          );
+        }
+
+        if (parsedVoiceCommand.kind === "rejected") {
+          setVoiceCommandStatus({
+            state:
+              parsedVoiceCommand.reason === "commandRequiresFullerPhrase" ||
+              parsedVoiceCommand.reason === "multiplePossibleMatches"
+                ? "commandNeedsFullerPhrase"
+                : "heardSpeechNoMatch",
+            detail: buildVoiceCommandRejectedStatusDetail(parsedVoiceCommand)
+          });
+          void playVoiceCommandEarcon("failure").catch(() => {});
+          reportVoiceCommandAttempt({
+            outcome: "noMatch",
+            result
+          });
+          return await runHandsFreeCooldown(
+            `${buildVoiceCommandRejectedStatusDetail(parsedVoiceCommand)} Returning to wake listening.`,
+            signal
+          );
+        }
+
+        setVoiceCommandStatus({
+          state: "heardCommand",
+          detail: buildVoiceCommandMatchStatusDetail(parsedVoiceCommand)
+        });
+        void playVoiceCommandEarcon("success").catch(() => {});
+        reportVoiceCommandAttempt({
+          outcome: "matched",
+          result,
+          matchedCommand: parsedVoiceCommand.command
+        });
+        executeVoiceReaderCommand(parsedVoiceCommand.command);
+        return await runHandsFreeCooldown(
+          `${buildVoiceCommandMatchStatusDetail(parsedVoiceCommand)} Returning to wake listening.`,
+          signal
+        );
+      }
+    }
+  }
+
+  async function runHandsFreeWakeLoop(signal: AbortSignal) {
+    while (!signal.aborted) {
+      handsFreeWakePhaseRef.current = null;
+      setVoiceCommandStatus({
+        state: "starting",
+        detail: "Hands-free initializing. Attaching the selected microphone for wake listening."
+      });
+
+      const startResult = await window.phronon.startLocalVoiceWakeSession({
+        grammarPhrases: readerHandsFreeWakeGrammarPhrases,
+        preferredInputDeviceId: props.preferredLocalVoiceInputDeviceId
+      });
+
+      if (!startResult.ok) {
+        const wakeResult = startResult.result;
+
+        if ("microphone" in wakeResult && wakeResult.microphone) {
+          setLocalVoiceMicrophoneStatus(wakeResult.microphone);
+        }
+
+        if (wakeResult.kind === "permissionDenied") {
+          setVoiceCommandStatus({
+            state: "permissionDenied",
+            detail: wakeResult.detail
+          });
+          return;
+        }
+
+        const detail = `${wakeResult.detail} Hands-free stopped and Reader fell back to press to listen.`;
+        setHandsFreeRuntimeFallbackDetail(detail);
+        setHandsFreeVoiceState((currentState) =>
+          reduceHandsFreeVoiceState(currentState, {
+            type: "modeResolved",
+            resolution: {
+              preferredMode: "handsFreeWakePhrase",
+              effectiveMode: "pressToListen",
+              handsFreeAvailable: false,
+              experimentalHandsFreeEnabled,
+              fellBackToPressToListen: true,
+              detail
+            }
+          })
+        );
+        setVoiceCommandStatus({
+          state: "availableToTry",
+          detail
+        });
+        return;
+      }
+
+      const sessionId = startResult.sessionId;
+      handsFreeWakeSessionIdRef.current = sessionId;
+
+      const handleAbort = () => {
+        const activeSessionId = handsFreeWakeSessionIdRef.current;
+
+        if (activeSessionId) {
+          void window.phronon.cancelLocalVoiceWakeSession(activeSessionId);
+        }
+      };
+
+      signal.addEventListener("abort", handleAbort, {
+        once: true
+      });
+
+      let snapshotPollingActive = true;
+      let snapshotPollTimer: ReturnType<typeof setInterval> | null = null;
+      let lastSnapshotUpdatedAt = -1;
+
+      const pollSnapshot = () => {
+        void window.phronon.getLocalVoiceWakeSessionSnapshot(sessionId).then((snapshot) => {
+          if (!snapshotPollingActive || !snapshot) {
+            return;
+          }
+
+          if (snapshot.updatedAt === lastSnapshotUpdatedAt) {
+            setHandsFreeWakeDiagnostics(snapshot.diagnostics);
+            return;
+          }
+
+          lastSnapshotUpdatedAt = snapshot.updatedAt;
+          applyHandsFreeWakeSnapshot(snapshot as HandsFreeWakeSessionSnapshot);
+        });
+      };
+
+      pollSnapshot();
+      snapshotPollTimer = setInterval(pollSnapshot, 120);
+
+      const wakeResult = await window.phronon.waitForLocalVoiceWakeSession(sessionId);
+
+      snapshotPollingActive = false;
+      if (snapshotPollTimer !== null) {
+        clearInterval(snapshotPollTimer);
+      }
+      signal.removeEventListener("abort", handleAbort);
+      if (handsFreeWakeSessionIdRef.current === sessionId) {
+        handsFreeWakeSessionIdRef.current = null;
+      }
+
+      if (signal.aborted) {
+        return;
+      }
+
+      if ("microphone" in wakeResult && wakeResult.microphone) {
+        setLocalVoiceMicrophoneStatus(wakeResult.microphone);
+      }
+
+      if (wakeResult.kind === "unsupported" || wakeResult.kind === "runtimeEndedEarly") {
+        const detail = `${wakeResult.detail} Hands-free stopped and Reader fell back to press to listen.`;
+        setHandsFreeRuntimeFallbackDetail(detail);
+        setHandsFreeVoiceState((currentState) =>
+          reduceHandsFreeVoiceState(currentState, {
+            type: "modeResolved",
+            resolution: {
+              preferredMode: "handsFreeWakePhrase",
+              effectiveMode: "pressToListen",
+              handsFreeAvailable: false,
+              experimentalHandsFreeEnabled,
+              fellBackToPressToListen: true,
+              detail
+            }
+          })
+        );
+        setVoiceCommandStatus({
+          state: "availableToTry",
+          detail
+        });
+        return;
+      }
+
+      if (wakeResult.kind === "permissionDenied") {
+        setVoiceCommandStatus({
+          state: "permissionDenied",
+          detail: wakeResult.detail
+        });
+        return;
+      }
+
+      if (!matchesHandsFreeWakePhrase(wakeResult)) {
+        continue;
+      }
+
+      setHandsFreeWakeDiagnostics((currentDiagnostics) =>
+        currentDiagnostics
+          ? {
+              ...currentDiagnostics,
+              lastWakeCandidate:
+                wakeResult.kind === "heardSpeech" ? wakeResult.heardText ?? currentDiagnostics.lastWakeCandidate : currentDiagnostics.lastWakeCandidate,
+              lastFinalTranscriptCandidate:
+                wakeResult.kind === "heardSpeech"
+                  ? wakeResult.heardText ?? currentDiagnostics.lastFinalTranscriptCandidate
+                  : currentDiagnostics.lastFinalTranscriptCandidate,
+              lastWakeResult: "matched",
+              lastWakeConfidenceResult: currentDiagnostics.lastWakeConfidenceResult ?? "high",
+              reasonWakeDidNotFire: null
+            }
+          : currentDiagnostics
+      );
+      setHandsFreeVoiceState((currentState) =>
+        reduceHandsFreeVoiceState(currentState, {
+          type: "wakePhraseDetected"
+        })
+      );
+      setVoiceCommandStatus({
+        state: "starting",
+        detail: "Wake phrase heard. Opening a short command window for one Reader command."
+      });
+
+      const wakeRequestId = voiceCommandRequestIdRef.current + 1;
+      voiceCommandRequestIdRef.current = wakeRequestId;
+
+      const shouldContinue = await runHandsFreeCommandWindow(wakeRequestId, signal);
+
+      if (!shouldContinue) {
+        return;
+      }
+    }
+  }
+
+  useEffect(() => {
+    handsFreeLoopAbortControllerRef.current?.abort();
+    handsFreeLoopAbortControllerRef.current = null;
+
+    if (props.preferredReaderVoiceMode !== "handsFreeWakePhrase" || effectiveReaderVoiceMode !== "handsFreeWakePhrase") {
+      return;
+    }
+
+    if (playbackState === "playing") {
+      setHandsFreeVoiceState((currentState) =>
+        reduceHandsFreeVoiceState(currentState, {
+          type: "playbackStarted"
+        })
+      );
+      setVoiceCommandStatus({
+        state: "availableToTry",
+        detail: readerHandsFreePlaybackSuspendMessage
+      });
+      return;
+    }
+
+    setHandsFreeVoiceState((currentState) =>
+      reduceHandsFreeVoiceState(currentState, {
+        type: "playbackStopped"
+      })
+    );
+
+    const abortController = new AbortController();
+    handsFreeLoopAbortControllerRef.current = abortController;
+    void runHandsFreeWakeLoop(abortController.signal);
+
+    return () => {
+      abortController.abort();
+
+      if (handsFreeLoopAbortControllerRef.current === abortController) {
+        handsFreeLoopAbortControllerRef.current = null;
+      }
+    };
+  }, [effectiveReaderVoiceMode, playbackState, props.preferredLocalVoiceInputDeviceId, props.preferredReaderVoiceMode]);
 
   function moveToParagraph(direction: "previous" | "next") {
     if (paragraphs.length === 0) {
@@ -2940,22 +3985,29 @@ function ReaderScreen(props: {
 
           <div className="playback-group playback-voice-group" role="group" aria-label="Voice command mode">
             <div className="playback-voice-copy">
-              <button
-                ref={voiceCommandButtonRef}
-                type="button"
-                onClick={handleListenForVoiceCommand}
-                disabled={voiceCommandInteractionDisabled}
-                aria-pressed={isListeningForVoiceCommand}
-                aria-describedby={`${voiceCommandStatusId} ${voiceCommandSupportId}`}
-              >
-                {voiceCommandButtonLabel}
-              </button>
+              {shouldShowManualVoiceButton ? (
+                <button
+                  ref={voiceCommandButtonRef}
+                  type="button"
+                  onClick={handleListenForVoiceCommand}
+                  disabled={voiceCommandInteractionDisabled}
+                  aria-pressed={isListeningForVoiceCommand}
+                  aria-describedby={`${voiceCommandStatusId} ${voiceCommandSupportId}`}
+                >
+                  {manualVoiceCommandButtonLabel}
+                </button>
+              ) : null}
               <p id={voiceCommandStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
                 {voiceCommandStatusMessage}
               </p>
               <p id={voiceCommandSupportId} className="hint playback-voice-note">
-                {voiceCommandSupportMessage}
+                {voiceControlSupportMessage}
               </p>
+              {readerLocalVoiceMicrophoneMessage ? (
+                <p className="status-message compact-status playback-voice-note" role="status" aria-live="polite" aria-atomic="true">
+                  {readerLocalVoiceMicrophoneMessage}
+                </p>
+              ) : null}
             </div>
             <div className="playback-illustration" aria-hidden="true">
               <img
@@ -3070,7 +4122,7 @@ function ReaderScreen(props: {
             <summary className="reader-shortcuts-summary">Voice command list</summary>
             <div className="reader-shortcuts-reference" aria-label="Supported voice commands">
               <p className="hint reader-shortcuts-note">
-                Experimental browser fallback. Press `Listen for one command`, then say one exact English phrase.
+                {voiceCommandHelpMessage}
               </p>
               <ul className="simple-list reader-voice-command-list" aria-label="Supported Reader voice commands">
                 {readerVoiceCommandLabels.map((commandLabel) => (
@@ -3321,8 +4373,21 @@ function SettingsScreen(props: {
   onSpeechVoicePreferenceChange: (nextPreference: SpeechVoicePreference) => void;
   preferredVoiceId: string | null;
   onPreferredVoiceIdChange: (nextVoiceId: string | null) => void;
+  preferredReaderVoiceMode: ReaderVoiceMode;
+  onPreferredReaderVoiceModeChange: (nextMode: ReaderVoiceMode) => void;
+  preferredLocalVoiceCommandPath: LocalVoiceCommandPathPreference;
+  onPreferredLocalVoiceCommandPathChange: (nextPath: LocalVoiceCommandPathPreference) => void;
+  preferredLocalVoiceInputDeviceId: string | null;
+  testedLocalVoiceInputDeviceId: string | null;
+  testedLocalVoiceInputDeviceLabel: string | null;
+  onPreferredLocalVoiceInputDeviceIdChange: (nextDeviceId: string | null) => void;
+  onTestedLocalVoiceInputDeviceChange: (nextDevice: { id: string | null; label: string | null }) => void;
+  onLocalVoiceMicrophoneStatusChange: (nextStatus: LocalVoiceMicrophoneStatus | null) => void;
   voicesInitialized: boolean;
   runtimeSupportStatus: RuntimeSupportStatus | null;
+  voiceCommandTelemetry: VoiceCommandTelemetryState;
+  onResetVoiceCommandTelemetry: () => void;
+  onAnnounce: (message: string) => void;
 }) {
   const settingsTitleId = useId();
   const visibleLanguageId = useId();
@@ -3336,10 +4401,31 @@ function SettingsScreen(props: {
   const voiceSummaryId = useId();
   const displayHintId = useId();
   const voiceModeHintId = useId();
+  const readerVoiceModeId = useId();
+  const readerVoiceModeHintId = useId();
   const voicePickerHintId = useId();
   const voiceFallbackId = useId();
   const voiceListId = useId();
+  const currentMicrophoneId = useId();
+  const currentMicrophoneHintId = useId();
+  const recommendedMicrophonesId = useId();
+  const recommendedMicrophonesHintId = useId();
+  const microphonePickerId = useId();
+  const microphoneHintId = useId();
+  const microphoneStatusId = useId();
+  const microphoneMissingId = useId();
+  const voiceArchitectureId = useId();
+  const voiceArchitectureHintId = useId();
+  const voiceMetricsId = useId();
+  const microphoneTestStatusId = useId();
+  const microphoneTestMeterId = useId();
   const hasArabicVoice = findArabicVoice(props.availableVoices) !== null;
+  const [microphoneTest, setMicrophoneTest] = useState<LocalVoiceMicrophoneTestSnapshot | LocalVoiceMicrophoneTestResult | null>(
+    null
+  );
+  const [isTestingMicrophone, setIsTestingMicrophone] = useState(false);
+  const microphoneTestSessionIdRef = useRef<string | null>(null);
+  const microphoneTestPollTimerRef = useRef<number | null>(null);
   const runtimeDiagnostics = buildRuntimeDiagnosticsItems({
     runtimeSupportStatus: props.runtimeSupportStatus,
     voicesInitialized: props.voicesInitialized,
@@ -3359,6 +4445,43 @@ function SettingsScreen(props: {
   const diagnosticsSetupItems = runtimeDiagnostics.filter((item) => item.statusLabel === "Optional extra setup");
   const diagnosticsUnavailableItems = runtimeDiagnostics.filter((item) => item.statusLabel === "Unavailable on this device");
   const diagnosticsCheckingItems = runtimeDiagnostics.filter((item) => item.statusLabel === "Checking");
+  const localVoiceMicrophone = props.runtimeSupportStatus?.voiceCommandSupport.microphone ?? null;
+  const localVoicePathSupport = props.runtimeSupportStatus?.voiceCommandSupport.paths ?? null;
+  const selectedLocalVoicePath = resolveSelectedLocalVoiceCommandPath({
+    preference: props.preferredLocalVoiceCommandPath,
+    support: props.runtimeSupportStatus?.voiceCommandSupport ?? null
+  });
+  const selectedLocalVoiceTelemetrySummary = summarizeVoiceCommandTelemetry(
+    props.voiceCommandTelemetry,
+    selectedLocalVoicePath.support.providerId
+  );
+  const localVoiceMicrophoneDevices = localVoiceMicrophone?.devices ?? [];
+  const missingMicrophoneOptionLabel = buildMissingLocalVoiceInputOptionLabel(localVoiceMicrophone);
+  const localVoiceMicrophoneStatusMessage = buildLocalVoiceMicrophoneStatusMessage(localVoiceMicrophone);
+  const activeLocalVoiceDeviceId = localVoiceMicrophone?.activeDevice?.id ?? null;
+  const activeLocalVoiceDeviceLabel = localVoiceMicrophone?.activeDevice
+    ? buildLocalVoiceInputSummaryLabel(localVoiceMicrophone.activeDevice, localVoiceMicrophoneDevices)
+    : null;
+  const recommendedLocalVoiceDevices = buildRecommendedLocalVoiceInputDevices({
+    devices: localVoiceMicrophoneDevices,
+    activeDeviceId: activeLocalVoiceDeviceId,
+    preferredDeviceId: props.preferredLocalVoiceInputDeviceId,
+    testedDeviceId: props.testedLocalVoiceInputDeviceId,
+    maxCount: 4
+  });
+  const recommendedLocalVoiceDeviceIds = new Set(recommendedLocalVoiceDevices.map((device) => device.id));
+  const selectedMicrophoneTestTargetId =
+    props.preferredLocalVoiceInputDeviceId ?? localVoiceMicrophone?.activeDevice?.id ?? null;
+  const selectedMicrophoneTestTarget =
+    localVoiceMicrophoneDevices.find((device) => device.id === selectedMicrophoneTestTargetId) ??
+    localVoiceMicrophone?.activeDevice ??
+    null;
+  const microphoneTestStatusMessage = buildLocalVoiceMicrophoneTestStatusMessage(microphoneTest);
+  const microphoneTestMeterPercent = clampLocalVoiceMicrophoneMeterPercent(microphoneTest?.microphone?.peakRms ?? null);
+  const microphoneTestPeakRms = formatLocalVoiceRms(microphoneTest?.microphone?.peakRms ?? null);
+  const microphoneTestLastRms = formatLocalVoiceRms(microphoneTest?.microphone?.lastRms ?? null);
+  const testedMicrophoneActive =
+    props.testedLocalVoiceInputDeviceId !== null && props.testedLocalVoiceInputDeviceId === activeLocalVoiceDeviceId;
   const diagnosticsSummaryItems = [
     { label: "Ready now", value: diagnosticsReadyItems.length },
     { label: "Optional setup", value: diagnosticsSetupItems.length },
@@ -3404,6 +4527,12 @@ function SettingsScreen(props: {
           : "Automatic voice behavior stays close to manual voice setup when you need more control."
     },
     {
+      title: "Voice microphone",
+      description: localVoiceMicrophone?.activeDevice
+        ? `${localVoiceMicrophone.activeDevice.name} is currently active for local Reader voice commands.`
+        : "Microphone selection stays in Settings so Reader can stay document-first."
+    },
+    {
       title: "Setup status",
       description:
         diagnosticsReadyItems.length === runtimeDiagnostics.length
@@ -3411,6 +4540,129 @@ function SettingsScreen(props: {
           : `${diagnosticsReadyItems.length} of ${runtimeDiagnostics.length} checks are ready now.`
     }
   ];
+
+  useEffect(() => {
+    return () => {
+      if (microphoneTestPollTimerRef.current !== null) {
+        window.clearInterval(microphoneTestPollTimerRef.current);
+      }
+
+      if (microphoneTestSessionIdRef.current) {
+        void window.phronon.cancelLocalVoiceMicrophoneTest(microphoneTestSessionIdRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isTestingMicrophone) {
+      return;
+    }
+
+    setMicrophoneTest(null);
+  }, [isTestingMicrophone, props.preferredLocalVoiceInputDeviceId]);
+
+  async function handleMicrophoneTest() {
+    if (isTestingMicrophone || !selectedMicrophoneTestTargetId) {
+      return;
+    }
+
+    if (microphoneTestPollTimerRef.current !== null) {
+      window.clearInterval(microphoneTestPollTimerRef.current);
+      microphoneTestPollTimerRef.current = null;
+    }
+
+    if (microphoneTestSessionIdRef.current) {
+      await window.phronon.cancelLocalVoiceMicrophoneTest(microphoneTestSessionIdRef.current);
+      microphoneTestSessionIdRef.current = null;
+    }
+
+    setIsTestingMicrophone(true);
+    setMicrophoneTest(null);
+
+    const startResult = await window.phronon.startLocalVoiceMicrophoneTest({
+      preferredInputDeviceId: selectedMicrophoneTestTargetId
+    });
+
+    if (!startResult.ok) {
+      setIsTestingMicrophone(false);
+      setMicrophoneTest(startResult.result);
+      if (startResult.result.microphone) {
+        props.onLocalVoiceMicrophoneStatusChange(startResult.result.microphone);
+      }
+      props.onAnnounce(startResult.result.detail);
+      return;
+    }
+
+    microphoneTestSessionIdRef.current = startResult.sessionId;
+    setMicrophoneTest({
+      sessionId: startResult.sessionId,
+      state: "opening",
+      detail: "Opening the selected microphone for a short signal test.",
+      microphone:
+        localVoiceMicrophone ??
+        ({
+          requestedDeviceId: selectedMicrophoneTestTargetId,
+          requestedDeviceMissing: false,
+          selectionSource: null,
+          selectionDetail: "Phronon is checking microphone devices for local Reader voice commands.",
+          activeDevice: selectedMicrophoneTestTarget,
+          devices: localVoiceMicrophoneDevices,
+          sampleRate: selectedMicrophoneTestTarget?.defaultSampleRate ?? null,
+          signalDetected: null,
+          peakRms: null,
+          lastRms: null
+        } satisfies LocalVoiceMicrophoneStatus),
+      updatedAt: Date.now()
+    });
+
+    microphoneTestPollTimerRef.current = window.setInterval(() => {
+      const sessionId = microphoneTestSessionIdRef.current;
+
+      if (!sessionId) {
+        return;
+      }
+
+      void window.phronon.getLocalVoiceMicrophoneTestSnapshot(sessionId).then((snapshot) => {
+        if (!snapshot || microphoneTestSessionIdRef.current !== sessionId) {
+          return;
+        }
+
+        setMicrophoneTest(snapshot);
+
+        if (snapshot.microphone) {
+          props.onLocalVoiceMicrophoneStatusChange(snapshot.microphone);
+        }
+      });
+    }, 120);
+
+    const finalResult = await window.phronon.waitForLocalVoiceMicrophoneTest(startResult.sessionId);
+
+    if (microphoneTestPollTimerRef.current !== null) {
+      window.clearInterval(microphoneTestPollTimerRef.current);
+      microphoneTestPollTimerRef.current = null;
+    }
+
+    if (microphoneTestSessionIdRef.current !== startResult.sessionId) {
+      return;
+    }
+
+    microphoneTestSessionIdRef.current = null;
+    setIsTestingMicrophone(false);
+    setMicrophoneTest(finalResult);
+
+    if (finalResult.microphone) {
+      props.onLocalVoiceMicrophoneStatusChange(finalResult.microphone);
+    }
+
+    if (finalResult.state === "signalDetected" && finalResult.microphone?.activeDevice) {
+      props.onTestedLocalVoiceInputDeviceChange({
+        id: finalResult.microphone.activeDevice.id,
+        label: finalResult.microphone.activeDevice.name
+      });
+    }
+
+    props.onAnnounce(finalResult.detail);
+  }
 
   return (
     <section className="page-workspace settings-workspace" aria-labelledby={settingsTitleId}>
@@ -3569,6 +4821,502 @@ function SettingsScreen(props: {
                   Automatic mode prefers an Arabic-capable voice for Arabic script and keeps the default voice for other text.
                 </p>
               </section>
+            </div>
+          </section>
+
+          <section
+            className="panel-section settings-region"
+            aria-labelledby="settings-local-microphone-title"
+            aria-describedby={`${recommendedMicrophonesHintId} ${microphoneStatusId}`}
+          >
+            <div className="panel-section-header settings-region-header">
+              <p className="panel-kicker">Local Reader voice</p>
+              <h3 id="settings-local-microphone-title">Manual path and microphone</h3>
+              <p>Keep Reader voice manual: choose the local path used for press-to-listen, confirm the active microphone, and open diagnostics only when you need them.</p>
+            </div>
+
+            <div className="settings-subsection-grid">
+              <section
+                className="settings-subsection settings-subsection-emphasis"
+                aria-labelledby={readerVoiceModeId}
+                aria-describedby={readerVoiceModeHintId}
+              >
+                <div className="settings-subsection-header">
+                  <h4 id={readerVoiceModeId}>Voice mode</h4>
+                  <p>Use one clear press-to-listen action or turn Reader voice off completely.</p>
+                </div>
+                <div className="form-grid settings-form-grid" role="group" aria-label="Reader voice mode">
+                  <label className="field" htmlFor="reader-voice-mode">
+                    <span>Reader voice mode</span>
+                    <select
+                      id="reader-voice-mode"
+                      name="preferredReaderVoiceMode"
+                      value={props.preferredReaderVoiceMode === "off" ? "off" : "pressToListen"}
+                      onChange={(event) =>
+                        props.onPreferredReaderVoiceModeChange(event.target.value === "off" ? "off" : "pressToListen")
+                      }
+                    >
+                      <option value="off">Off</option>
+                      <option value="pressToListen">Press to listen</option>
+                    </select>
+                  </label>
+                </div>
+                <p id={readerVoiceModeHintId} className="hint">
+                  {props.preferredReaderVoiceMode === "off"
+                    ? "Voice stays off until you turn it back on."
+                    : "Press to listen is the supported workflow on this branch. The wake-word experiment is preserved only as background experiment code and is no longer part of the product flow."}
+                </p>
+              </section>
+
+              <section
+                className="settings-subsection settings-subsection-emphasis"
+                aria-labelledby={voiceArchitectureId}
+                aria-describedby={voiceArchitectureHintId}
+              >
+                <div className="settings-subsection-header">
+                  <h4 id={voiceArchitectureId}>Manual local voice path</h4>
+                  <p>Choose which local path runs when you press to listen. Baseline stays the dependable default, while v2 remains an explicit manual trial path.</p>
+                </div>
+                <div
+                  className="settings-device-choice-grid"
+                  role="radiogroup"
+                  aria-labelledby={voiceArchitectureId}
+                  aria-describedby={voiceArchitectureHintId}
+                >
+                  {(["baseline", "experimentalV2"] as const).map((pathId) => {
+                    const pathSupport =
+                      localVoicePathSupport?.[pathId] ??
+                      (pathId === "baseline"
+                        ? {
+                            providerId: "localVosk",
+                            providerLabel: "Local offline speech recognition (Vosk)",
+                            state: "optionalSetup" as const,
+                            detail:
+                              "Local offline Reader voice commands need optional setup before the baseline Vosk path can run here.",
+                            experimental: false
+                          }
+                        : {
+                            providerId: "localVoskCommandV2",
+                            providerLabel: "Experimental offline speech recognition (Vosk v2)",
+                            state: "optionalSetup" as const,
+                            detail:
+                              "Experimental local Reader voice v2 shares the same optional setup as the baseline Vosk path.",
+                            experimental: true
+                          });
+                    const isSelected = props.preferredLocalVoiceCommandPath === pathId;
+
+                    return (
+                      <label
+                        key={pathId}
+                        className={
+                          isSelected
+                            ? "settings-device-card settings-device-choice is-selected"
+                            : "settings-device-card settings-device-choice"
+                        }
+                      >
+                        <input
+                          type="radio"
+                          name="preferredLocalVoiceCommandPath"
+                          checked={isSelected}
+                          onChange={() => props.onPreferredLocalVoiceCommandPathChange(pathId)}
+                        />
+                        <span className="settings-device-card-header">
+                          <span className="settings-voice-name">{getLocalVoiceCommandPathLabel(pathId)}</span>
+                          <span className="settings-device-badges" aria-label={`${getLocalVoiceCommandPathLabel(pathId)} labels`}>
+                            <span className="settings-device-badge">
+                              {pathSupport.state === "ready"
+                                ? "Ready"
+                                : pathSupport.state === "unavailable"
+                                  ? "Unavailable"
+                                  : "Needs setup"}
+                            </span>
+                            {pathSupport.experimental ? (
+                              <span className="settings-device-badge">Experimental</span>
+                            ) : (
+                              <span className="settings-device-badge">Fallback</span>
+                            )}
+                            {isSelected ? <span className="settings-device-badge">Selected</span> : null}
+                          </span>
+                        </span>
+                        <span className="settings-voice-meta">
+                          {buildLocalVoiceCommandPathOptionDescription({
+                            preference: pathId,
+                            support: pathSupport
+                          })}
+                        </span>
+                        <span className="hint">{pathSupport.detail}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p id={voiceArchitectureHintId} className="hint">
+                  {selectedLocalVoicePath.fellBack
+                    ? `Experimental v2 is selected, but Phronon is currently falling back to ${getLocalVoiceCommandPathLabel(selectedLocalVoicePath.path)} for press-to-listen because v2 is not ready on this device.`
+                    : `Reader will use ${getLocalVoiceCommandPathLabel(selectedLocalVoicePath.path)} whenever you press to listen and a local provider is ready.`}
+                </p>
+              </section>
+
+              <details className="reader-shortcuts-details settings-voice-advanced-details">
+                <summary className="reader-shortcuts-summary">Voice diagnostics</summary>
+                <div className="reader-shortcuts-reference settings-voice-advanced-content">
+                  <section className="settings-subsection" aria-labelledby={voiceMetricsId}>
+                    <div className="settings-subsection-header">
+                      <h4 id={voiceMetricsId}>Manual voice diagnostics</h4>
+                      <p>Use repeated press-to-listen trials here when you want to compare latency and command reliability.</p>
+                    </div>
+                    <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                      {selectedLocalVoiceTelemetrySummary.attempts === 0
+                        ? `No trials recorded yet for ${selectedLocalVoicePath.support.providerLabel}.`
+                        : `${selectedLocalVoiceTelemetrySummary.successCount} of ${selectedLocalVoiceTelemetrySummary.attempts} trials matched a command (${selectedLocalVoiceTelemetrySummary.successRate}%).`}
+                    </p>
+                    <ul className="simple-list settings-diagnostics-list" aria-label="Voice command trial metrics">
+                      <li className="settings-diagnostics-item">
+                        <div className="settings-diagnostics-item-top">
+                          <span className="settings-status-pill settings-status-pill-ready">Latency</span>
+                          <span className="settings-diagnostics-name">Press to service ready</span>
+                        </div>
+                        <p className="settings-diagnostics-detail">
+                          {formatVoiceCommandLatency(selectedLocalVoiceTelemetrySummary.averagePressToServiceReadyLatencyMs)}
+                        </p>
+                      </li>
+                      <li className="settings-diagnostics-item">
+                        <div className="settings-diagnostics-item-top">
+                          <span className="settings-status-pill settings-status-pill-ready">Latency</span>
+                          <span className="settings-diagnostics-name">Press to mic active</span>
+                        </div>
+                        <p className="settings-diagnostics-detail">
+                          {formatVoiceCommandLatency(selectedLocalVoiceTelemetrySummary.averagePressToMicActiveLatencyMs)}
+                        </p>
+                      </li>
+                      <li className="settings-diagnostics-item">
+                        <div className="settings-diagnostics-item-top">
+                          <span className="settings-status-pill settings-status-pill-ready">Latency</span>
+                          <span className="settings-diagnostics-name">Speech onset</span>
+                        </div>
+                        <p className="settings-diagnostics-detail">
+                          {formatVoiceCommandLatency(selectedLocalVoiceTelemetrySummary.averageSpeechOnsetLatencyMs)}
+                        </p>
+                      </li>
+                      <li className="settings-diagnostics-item">
+                        <div className="settings-diagnostics-item-top">
+                          <span className="settings-status-pill settings-status-pill-ready">Latency</span>
+                          <span className="settings-diagnostics-name">Transcript ready</span>
+                        </div>
+                        <p className="settings-diagnostics-detail">
+                          {formatVoiceCommandLatency(selectedLocalVoiceTelemetrySummary.averageTranscriptReadyLatencyMs)}
+                        </p>
+                      </li>
+                      <li className="settings-diagnostics-item">
+                        <div className="settings-diagnostics-item-top">
+                          <span className="settings-status-pill settings-status-pill-ready">Latency</span>
+                          <span className="settings-diagnostics-name">Match</span>
+                        </div>
+                        <p className="settings-diagnostics-detail">
+                          {formatVoiceCommandLatency(selectedLocalVoiceTelemetrySummary.averageMatchLatencyMs)}
+                        </p>
+                      </li>
+                      <li className="settings-diagnostics-item">
+                        <div className="settings-diagnostics-item-top">
+                          <span className="settings-status-pill settings-status-pill-setup">Outcomes</span>
+                          <span className="settings-diagnostics-name">Silence vs no-match</span>
+                        </div>
+                        <p className="settings-diagnostics-detail">
+                          {`Silence: ${selectedLocalVoiceTelemetrySummary.silenceCount}. No match: ${selectedLocalVoiceTelemetrySummary.noMatchCount}. Runtime failures: ${selectedLocalVoiceTelemetrySummary.runtimeFailureCount}.`}
+                        </p>
+                      </li>
+                    </ul>
+                    <div className="button-row">
+                      <button type="button" className="secondary-button" onClick={props.onResetVoiceCommandTelemetry}>
+                        Reset trial metrics
+                      </button>
+                    </div>
+                    {selectedLocalVoiceTelemetrySummary.latestAttempt ? (
+                      <p className="hint">
+                        {`Latest trial: ${selectedLocalVoiceTelemetrySummary.latestAttempt.outcome}. Heard text: ${selectedLocalVoiceTelemetrySummary.latestAttempt.heardText ?? "none"}.`}
+                      </p>
+                    ) : (
+                      <p className="hint">
+                        Run several `Press to listen` trials from Reader with the same microphone and command list before comparing paths.
+                      </p>
+                    )}
+                  </section>
+                </div>
+              </details>
+            </div>
+
+            <div className="settings-voice-primary">
+              <section
+                className="settings-subsection"
+                aria-labelledby={currentMicrophoneId}
+                aria-describedby={`${currentMicrophoneHintId} ${microphoneStatusId} ${microphoneMissingId}`}
+              >
+                <div className="settings-subsection-header">
+                  <h4 id={currentMicrophoneId}>Current microphone</h4>
+                  <p>Reader keeps this short. Setup details stay here in Settings.</p>
+                </div>
+                {localVoiceMicrophone?.activeDevice ? (
+                  <div className="settings-device-card settings-device-card-current">
+                    <div className="settings-device-card-header">
+                      <span className="settings-voice-name">
+                        {buildLocalVoiceInputSummaryLabel(localVoiceMicrophone.activeDevice, localVoiceMicrophoneDevices)}
+                      </span>
+                      <span className="settings-device-badges" aria-label="Current microphone labels">
+                        {buildLocalVoiceInputBadgeLabels({
+                          device: localVoiceMicrophone.activeDevice,
+                          preferredDeviceId: props.preferredLocalVoiceInputDeviceId,
+                          testedDeviceId: props.testedLocalVoiceInputDeviceId,
+                          recommendedDeviceIds: recommendedLocalVoiceDeviceIds
+                        }).map((badge) => (
+                          <span key={badge} className="settings-device-badge">
+                            {badge}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                    <p className="settings-voice-meta">
+                      {buildLocalVoiceInputPreviewMeta(localVoiceMicrophone.activeDevice, localVoiceMicrophoneDevices) ||
+                        "Ready for local Reader voice commands."}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="hint settings-empty-copy">No active microphone endpoint is available right now.</p>
+                )}
+                <p id={microphoneStatusId} className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                  {localVoiceMicrophoneStatusMessage}
+                </p>
+                {localVoiceMicrophone?.requestedDeviceMissing ? (
+                  <p
+                    id={microphoneMissingId}
+                    className="status-message error-text compact-status"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                  >
+                    The previously selected microphone is no longer available. Phronon is using a safe fallback until you choose another device.
+                  </p>
+                ) : (
+                  <p id={microphoneMissingId} className="hint">
+                    Reader only shows the active microphone briefly. Full setup stays here in Settings.
+                  </p>
+                )}
+                <p id={currentMicrophoneHintId} className="hint">
+                  {testedMicrophoneActive
+                    ? `${activeLocalVoiceDeviceLabel ?? "This microphone"} is the most recently tested working endpoint.`
+                    : props.testedLocalVoiceInputDeviceLabel
+                      ? `Most recently tested working endpoint: ${props.testedLocalVoiceInputDeviceLabel}.`
+                      : "Run the microphone test once so Phronon can remember a tested working endpoint."}
+                </p>
+              </section>
+
+              <section
+                className="settings-subsection"
+                aria-labelledby={recommendedMicrophonesId}
+                aria-describedby={`${recommendedMicrophonesHintId} ${microphoneHintId}`}
+              >
+                <div className="settings-subsection-header">
+                  <h4 id={recommendedMicrophonesId}>Recommended microphones</h4>
+                  <p>Choose from the most useful devices first. The full endpoint list stays behind the advanced disclosure below.</p>
+                </div>
+                <p id={recommendedMicrophonesHintId} className="hint">
+                  Automatic selection uses your saved choice when it is still available, otherwise the OS default input, then the first valid microphone input device.
+                </p>
+                <div className="settings-device-choice-grid" role="radiogroup" aria-labelledby={recommendedMicrophonesId}>
+                  <label
+                    className={
+                      props.preferredLocalVoiceInputDeviceId === null
+                        ? "settings-device-card settings-device-choice is-selected"
+                        : "settings-device-card settings-device-choice"
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="preferredLocalVoiceInputDeviceRecommended"
+                      checked={props.preferredLocalVoiceInputDeviceId === null}
+                      onChange={() => props.onPreferredLocalVoiceInputDeviceIdChange(null)}
+                    />
+                    <span className="settings-device-card-header">
+                      <span className="settings-voice-name">Automatic selection</span>
+                      <span className="settings-device-badges" aria-label="Automatic selection labels">
+                        <span className="settings-device-badge">Recommended</span>
+                        {props.preferredLocalVoiceInputDeviceId === null ? (
+                          <span className="settings-device-badge">Selected</span>
+                        ) : null}
+                      </span>
+                    </span>
+                    <span className="settings-voice-meta">
+                      Follow the saved endpoint when it is still present, otherwise use the system default or the first valid microphone input.
+                    </span>
+                  </label>
+
+                  {recommendedLocalVoiceDevices.map((device) => {
+                    const badgeLabels = buildLocalVoiceInputBadgeLabels({
+                      device,
+                      preferredDeviceId: props.preferredLocalVoiceInputDeviceId,
+                      testedDeviceId: props.testedLocalVoiceInputDeviceId,
+                      recommendedDeviceIds: recommendedLocalVoiceDeviceIds
+                    });
+
+                    return (
+                      <label
+                        key={device.id}
+                        className={
+                          props.preferredLocalVoiceInputDeviceId === device.id
+                            ? "settings-device-card settings-device-choice is-selected"
+                            : "settings-device-card settings-device-choice"
+                        }
+                      >
+                        <input
+                          type="radio"
+                          name="preferredLocalVoiceInputDeviceRecommended"
+                          checked={props.preferredLocalVoiceInputDeviceId === device.id}
+                          onChange={() => props.onPreferredLocalVoiceInputDeviceIdChange(device.id)}
+                        />
+                        <span className="settings-device-card-header">
+                          <span className="settings-voice-name">
+                            {buildLocalVoiceInputSummaryLabel(device, localVoiceMicrophoneDevices)}
+                          </span>
+                          <span className="settings-device-badges" aria-label={`${device.name} labels`}>
+                            {badgeLabels.map((badge) => (
+                              <span key={badge} className="settings-device-badge">
+                                {badge}
+                              </span>
+                            ))}
+                          </span>
+                        </span>
+                        <span className="settings-voice-meta">
+                          {buildLocalVoiceInputPreviewMeta(device, localVoiceMicrophoneDevices) ||
+                            "Detected microphone input."}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {recommendedLocalVoiceDevices.length === 0 ? (
+                  <p className="hint settings-empty-copy">
+                    No microphone input devices were reported by the local voice backend yet.
+                  </p>
+                ) : null}
+              </section>
+
+              <div className="settings-subsection settings-microphone-test" aria-labelledby={microphoneTestStatusId}>
+                <div className="settings-subsection-header">
+                  <h4 id={microphoneTestStatusId}>Test selected microphone</h4>
+                  <p>Test the exact selected endpoint here before relying on local Reader voice commands. Virtual routes stay valid if they report input signal.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleMicrophoneTest();
+                  }}
+                  disabled={!selectedMicrophoneTestTargetId || isTestingMicrophone}
+                  aria-describedby={microphoneTestMeterId}
+                >
+                  {isTestingMicrophone ? "Testing selected microphone..." : "Test selected microphone"}
+                </button>
+                <p className="hint">
+                  {selectedMicrophoneTestTarget
+                    ? `Current test target: ${buildLocalVoiceInputSummaryLabel(
+                        selectedMicrophoneTestTarget,
+                        localVoiceMicrophoneDevices
+                      )}${buildLocalVoiceInputPreviewMeta(selectedMicrophoneTestTarget, localVoiceMicrophoneDevices)
+                        ? ` (${buildLocalVoiceInputPreviewMeta(selectedMicrophoneTestTarget, localVoiceMicrophoneDevices)})`
+                        : ""}`
+                    : props.preferredLocalVoiceInputDeviceId
+                      ? "Current test target: previously selected endpoint."
+                      : "Current test target: no microphone endpoint is available right now."}
+                </p>
+                <div
+                  id={microphoneTestMeterId}
+                  className="settings-microphone-meter"
+                  role="meter"
+                  aria-label="Selected microphone signal meter"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={microphoneTestMeterPercent}
+                >
+                  <span
+                    className="settings-microphone-meter-fill"
+                    style={{ width: `${microphoneTestMeterPercent}%` }}
+                  />
+                </div>
+                <p className="status-message compact-status" role="status" aria-live="polite" aria-atomic="true">
+                  {microphoneTestStatusMessage}
+                </p>
+                <p className="hint">
+                  Peak RMS: {microphoneTestPeakRms} | Current RMS: {microphoneTestLastRms}
+                  {microphoneTest?.detail ? ` | ${microphoneTest.detail}` : ""}
+                </p>
+              </div>
+
+              <details className="reader-shortcuts-details settings-voice-advanced-details">
+                <summary className="reader-shortcuts-summary">Show all input devices</summary>
+                <div className="reader-shortcuts-reference settings-voice-advanced-content">
+                  <label className="field" htmlFor={microphonePickerId}>
+                    <span>Choose from every detected input device</span>
+                    <select
+                      id={microphonePickerId}
+                      name="preferredLocalVoiceInputDevice"
+                      value={props.preferredLocalVoiceInputDeviceId ?? ""}
+                      onChange={(event) =>
+                        props.onPreferredLocalVoiceInputDeviceIdChange(event.target.value.trim() ? event.target.value : null)
+                      }
+                      disabled={localVoiceMicrophoneDevices.length === 0 && !missingMicrophoneOptionLabel}
+                      aria-describedby={`${microphoneHintId} ${microphoneMissingId}`}
+                    >
+                      <option value="">Automatic selection</option>
+                      {missingMicrophoneOptionLabel && props.preferredLocalVoiceInputDeviceId ? (
+                        <option value={props.preferredLocalVoiceInputDeviceId}>{missingMicrophoneOptionLabel}</option>
+                      ) : null}
+                      {localVoiceMicrophoneDevices.map((device) => (
+                        <option key={buildLocalVoiceInputOptionKey(device)} value={device.id}>
+                          {buildLocalVoiceInputOptionLabel(device)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <p id={microphoneHintId} className="hint">
+                    Advanced view shows the exact endpoint identity and backend metadata for distinguishing similar devices.
+                  </p>
+
+                  <section className="settings-subsection settings-voice-library" aria-labelledby="settings-detected-microphones-title">
+                    <div className="settings-subsection-header">
+                      <h4 id="settings-detected-microphones-title">Detected microphones</h4>
+                      <p>Only devices with input channels appear here, so speakers and output-only devices are excluded.</p>
+                    </div>
+                    {localVoiceMicrophoneDevices.length > 0 ? (
+                      <ul className="simple-list settings-voice-list" aria-label="Detected microphone input devices">
+                        {localVoiceMicrophoneDevices.map((device) => (
+                          <li key={device.id} className="settings-voice-item">
+                            <span className="settings-device-card-header">
+                              <span className="settings-voice-name">
+                                {buildLocalVoiceInputSummaryLabel(device, localVoiceMicrophoneDevices)}
+                              </span>
+                              <span className="settings-device-badges" aria-label={`${device.name} labels`}>
+                                {buildLocalVoiceInputBadgeLabels({
+                                  device,
+                                  preferredDeviceId: props.preferredLocalVoiceInputDeviceId,
+                                  testedDeviceId: props.testedLocalVoiceInputDeviceId,
+                                  recommendedDeviceIds: recommendedLocalVoiceDeviceIds
+                                }).map((badge) => (
+                                  <span key={badge} className="settings-device-badge">
+                                    {badge}
+                                  </span>
+                                ))}
+                              </span>
+                            </span>
+                            <span className="settings-voice-meta">{buildLocalVoiceInputDeviceMeta(device)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="hint settings-empty-copy">
+                        No microphone input devices were reported by the local voice backend yet.
+                      </p>
+                    )}
+                  </section>
+                </div>
+              </details>
             </div>
           </section>
 
@@ -3781,6 +5529,24 @@ export function App() {
     initialPersistenceState.speechVoicePreference
   );
   const [preferredVoiceId, setPreferredVoiceId] = useState<string | null>(initialPersistenceState.preferredVoiceId);
+  const [preferredReaderVoiceMode, setPreferredReaderVoiceMode] = useState<ReaderVoiceMode>(
+    initialPersistenceState.preferredReaderVoiceMode
+  );
+  const [preferredReaderWakePhrase, setPreferredReaderWakePhrase] = useState<ReaderWakePhraseOption>(
+    initialPersistenceState.preferredReaderWakePhrase
+  );
+  const [preferredLocalVoiceCommandPath, setPreferredLocalVoiceCommandPath] = useState<LocalVoiceCommandPathPreference>(
+    initialPersistenceState.preferredLocalVoiceCommandPath
+  );
+  const [preferredLocalVoiceInputDeviceId, setPreferredLocalVoiceInputDeviceId] = useState<string | null>(
+    initialPersistenceState.preferredLocalVoiceInputDeviceId
+  );
+  const [testedLocalVoiceInputDeviceId, setTestedLocalVoiceInputDeviceId] = useState<string | null>(
+    initialPersistenceState.testedLocalVoiceInputDeviceId
+  );
+  const [testedLocalVoiceInputDeviceLabel, setTestedLocalVoiceInputDeviceLabel] = useState<string | null>(
+    initialPersistenceState.testedLocalVoiceInputDeviceLabel
+  );
   const [lastOpenedDocumentPath, setLastOpenedDocumentPath] = useState<string | null>(
     initialPersistenceState.lastOpenedDocumentPath
   );
@@ -3788,6 +5554,9 @@ export function App() {
   const [voicesInitialized, setVoicesInitialized] = useState(false);
   const [activeLoad, setActiveLoad] = useState<ActiveDocumentLoad | null>(null);
   const [runtimeSupportStatus, setRuntimeSupportStatus] = useState<RuntimeSupportStatus | null>(null);
+  const [voiceCommandTelemetry, setVoiceCommandTelemetry] = useState<VoiceCommandTelemetryState>(
+    emptyVoiceCommandTelemetryState
+  );
   const [liveMessage, setLiveMessage] = useState<LiveMessage>({
     id: 0,
     text: ""
@@ -3800,6 +5569,7 @@ export function App() {
   const currentDocumentStateRef = useRef(documentState);
   const activeLoadRef = useRef<ActiveDocumentLoad | null>(null);
   const nextLoadRequestIdRef = useRef(0);
+  const runtimeSupportRequestIdRef = useRef(0);
   const currentScreen = screens.find((screen) => screen.id === activeScreen)!;
   const appShellStyle = {
     "--app-font-scale": interfaceTextScaleValueMap[interfaceTextScale].toString(),
@@ -3812,6 +5582,39 @@ export function App() {
       text
     }));
   }
+
+  function handleLocalVoiceMicrophoneStatusChange(nextStatus: LocalVoiceMicrophoneStatus | null) {
+    setRuntimeSupportStatus((currentStatus) => {
+      if (!currentStatus) {
+        return currentStatus;
+      }
+
+      return {
+        ...currentStatus,
+        voiceCommandSupport: {
+          ...currentStatus.voiceCommandSupport,
+          microphone: nextStatus
+        }
+      };
+    });
+  }
+
+  function handleVoiceCommandAttempt(
+    attempt: Parameters<typeof recordVoiceCommandAttempt>[1]
+  ) {
+    setVoiceCommandTelemetry((currentTelemetry) => recordVoiceCommandAttempt(currentTelemetry, attempt));
+  }
+
+  function handleResetVoiceCommandTelemetry() {
+    setVoiceCommandTelemetry(emptyVoiceCommandTelemetryState);
+    announce("Voice command trial metrics reset.");
+  }
+
+  useEffect(() => {
+    if (preferredReaderVoiceMode === "handsFreeWakePhrase") {
+      setPreferredReaderVoiceMode("pressToListen");
+    }
+  }, [preferredReaderVoiceMode]);
 
   function focusMainHeading() {
     setMainFocusRequest((current) => current + 1);
@@ -3975,38 +5778,91 @@ export function App() {
     };
   }, []);
 
-  useEffect(() => {
-    let isSubscribed = true;
+  const refreshRuntimeSupportStatus = useEffectEvent(async (preferredDeviceId: string | null) => {
+    const requestId = runtimeSupportRequestIdRef.current + 1;
+    runtimeSupportRequestIdRef.current = requestId;
 
-    void window.phronon
-      .getRuntimeSupportStatus()
-      .then((status) => {
-        if (!isSubscribed) {
-          return;
-        }
+    try {
+      const status = await window.phronon.getRuntimeSupportStatus({
+        preferredLocalVoiceInputDeviceId: preferredDeviceId
+      });
 
+      if (runtimeSupportRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      startTransition(() => {
         setRuntimeSupportStatus(status);
-      })
-      .catch(() => {
-        if (!isSubscribed) {
-          return;
-        }
+      });
+    } catch {
+      if (runtimeSupportRequestIdRef.current !== requestId) {
+        return;
+      }
 
+      startTransition(() => {
         setRuntimeSupportStatus({
           isPackaged: false,
           coreAppReady: true,
           pdfSupportAvailable: true,
           ocrSupportAvailable: false,
           arabicOcrSupportAvailable: false,
+          voiceCommandSupport: {
+            providerId: "localVosk",
+            providerLabel: "Local offline speech recognition (Vosk)",
+            state: "optionalSetup",
+            detail:
+              "Phronon could not fully check local offline Reader voice commands yet. The browser fallback may still be available to try in this runtime.",
+            setupCommand: 'python -m pip install -e "./backend[voice]"',
+            modelPath: null,
+            paths: {
+              baseline: {
+                providerId: "localVosk",
+                providerLabel: "Local offline speech recognition (Vosk)",
+                state: "optionalSetup",
+                detail:
+                  "Phronon could not fully check the baseline local Vosk path yet. The browser fallback may still be available to try in this runtime.",
+                experimental: false
+              },
+              experimentalV2: {
+                providerId: "localVoskCommandV2",
+                providerLabel: "Experimental offline speech recognition (Vosk v2)",
+                state: "optionalSetup",
+                detail:
+                  "Phronon could not fully check experimental local voice v2 yet. It stays opt-in until the warm-service path proves reliable.",
+                experimental: true
+              }
+            },
+            microphone: {
+              requestedDeviceId: preferredDeviceId,
+              requestedDeviceMissing: false,
+              selectionSource: null,
+              selectionDetail: "Phronon could not inspect microphone devices for local Reader voice commands yet.",
+              activeDevice: null,
+              devices: [],
+              sampleRate: null,
+              signalDetected: null,
+              peakRms: null,
+              lastRms: null
+            }
+          },
           message:
             "Phronon could not fully check optional extras yet. TXT files and standard text-based PDFs should still work."
         });
       });
+    }
+  });
 
-    return () => {
-      isSubscribed = false;
-    };
-  }, []);
+  useEffect(() => {
+    void refreshRuntimeSupportStatus(preferredLocalVoiceInputDeviceId);
+  }, [preferredLocalVoiceInputDeviceId, refreshRuntimeSupportStatus]);
+
+  useEffect(() => {
+    if (activeScreen !== "settings") {
+      return;
+    }
+
+    void refreshRuntimeSupportStatus(preferredLocalVoiceInputDeviceId);
+  }, [activeScreen, refreshRuntimeSupportStatus]);
 
   async function loadDocument(options?: LoadDocumentOptions) {
     const request = startDocumentLoad(options);
@@ -4187,6 +6043,12 @@ export function App() {
       contrastMode,
       speechVoicePreference,
       preferredVoiceId,
+      preferredReaderVoiceMode,
+      preferredReaderWakePhrase,
+      preferredLocalVoiceCommandPath,
+      preferredLocalVoiceInputDeviceId,
+      testedLocalVoiceInputDeviceId,
+      testedLocalVoiceInputDeviceLabel,
       lastOpenedDocumentPath,
       lastOpenedParagraphIndex:
         documentState.filePath && documentState.text ? clampParagraphIndex(currentParagraphIndex) : 0,
@@ -4203,6 +6065,12 @@ export function App() {
     interfaceTextScale,
     lastOpenedDocumentPath,
     playbackRate,
+    preferredLocalVoiceCommandPath,
+    preferredLocalVoiceInputDeviceId,
+    preferredReaderVoiceMode,
+    preferredReaderWakePhrase,
+    testedLocalVoiceInputDeviceId,
+    testedLocalVoiceInputDeviceLabel,
     preferredVoiceId,
     recentDocuments,
     readerTextScale,
@@ -4320,8 +6188,14 @@ export function App() {
               onPlaybackRateChange={(nextRate) => setPlaybackRate(clampReadingSpeed(nextRate))}
               speechVoicePreference={speechVoicePreference}
               preferredVoiceId={preferredVoiceId}
+              preferredReaderVoiceMode={preferredReaderVoiceMode}
+              preferredReaderWakePhrase={preferredReaderWakePhrase}
+              preferredLocalVoiceCommandPath={preferredLocalVoiceCommandPath}
+              preferredLocalVoiceInputDeviceId={preferredLocalVoiceInputDeviceId}
+              runtimeSupportStatus={runtimeSupportStatus}
               focusRequest={readerFocusRequest}
               onAnnounce={announce}
+              onVoiceCommandAttempt={handleVoiceCommandAttempt}
             />
           )}
           {activeScreen === "settings" && (
@@ -4337,8 +6211,24 @@ export function App() {
               onSpeechVoicePreferenceChange={setSpeechVoicePreference}
               preferredVoiceId={preferredVoiceId}
               onPreferredVoiceIdChange={setPreferredVoiceId}
+              preferredReaderVoiceMode={preferredReaderVoiceMode}
+              onPreferredReaderVoiceModeChange={setPreferredReaderVoiceMode}
+              preferredLocalVoiceCommandPath={preferredLocalVoiceCommandPath}
+              onPreferredLocalVoiceCommandPathChange={setPreferredLocalVoiceCommandPath}
+              preferredLocalVoiceInputDeviceId={preferredLocalVoiceInputDeviceId}
+              testedLocalVoiceInputDeviceId={testedLocalVoiceInputDeviceId}
+              testedLocalVoiceInputDeviceLabel={testedLocalVoiceInputDeviceLabel}
+              onPreferredLocalVoiceInputDeviceIdChange={setPreferredLocalVoiceInputDeviceId}
+              onTestedLocalVoiceInputDeviceChange={(nextDevice) => {
+                setTestedLocalVoiceInputDeviceId(nextDevice.id);
+                setTestedLocalVoiceInputDeviceLabel(nextDevice.label);
+              }}
+              onLocalVoiceMicrophoneStatusChange={handleLocalVoiceMicrophoneStatusChange}
               voicesInitialized={voicesInitialized}
               runtimeSupportStatus={runtimeSupportStatus}
+              voiceCommandTelemetry={voiceCommandTelemetry}
+              onResetVoiceCommandTelemetry={handleResetVoiceCommandTelemetry}
+              onAnnounce={announce}
             />
           )}
         </main>

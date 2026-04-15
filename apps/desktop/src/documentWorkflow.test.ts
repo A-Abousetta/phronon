@@ -95,6 +95,12 @@ test("parseReaderPersistenceState returns safe defaults for invalid data", () =>
     contrastMode: "default",
     speechVoicePreference: "automatic",
     preferredVoiceId: null,
+    preferredReaderVoiceMode: "pressToListen",
+    preferredReaderWakePhrase: "reader",
+    preferredLocalVoiceCommandPath: "baseline",
+    preferredLocalVoiceInputDeviceId: null,
+    testedLocalVoiceInputDeviceId: null,
+    testedLocalVoiceInputDeviceLabel: null,
     lastOpenedDocumentPath: null,
     lastOpenedParagraphIndex: 0,
     hasSeenOnboarding: false
@@ -150,6 +156,11 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
     contrastMode: "strong",
     speechVoicePreference: "manual",
     preferredVoiceId: "uri:voice-ar-sa",
+    preferredReaderVoiceMode: "pressToListen",
+    preferredReaderWakePhrase: "reader",
+    preferredLocalVoiceCommandPath: "experimentalV2",
+    preferredLocalVoiceInputDeviceId:
+      '{"backend":"sounddevice","backendDeviceId":"2","defaultSampleRate":48000,"hostapiId":0,"hostapiName":"Windows WASAPI","index":2,"maxInputChannels":1,"name":"USB Mic"}',
     lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
     lastOpenedParagraphIndex: 4.8,
     hasSeenOnboarding: true
@@ -196,10 +207,67 @@ test("parseReaderPersistenceState keeps only valid persisted reader values", () 
     contrastMode: "strong",
     speechVoicePreference: "manual",
     preferredVoiceId: "uri:voice-ar-sa",
+    preferredReaderVoiceMode: "pressToListen",
+    preferredReaderWakePhrase: "reader",
+    preferredLocalVoiceCommandPath: "experimentalV2",
+    preferredLocalVoiceInputDeviceId:
+      '{"backend":"sounddevice","backendDeviceId":"2","defaultSampleRate":48000,"hostapiId":0,"hostapiName":"Windows WASAPI","index":2,"maxInputChannels":1,"name":"USB Mic"}',
+    testedLocalVoiceInputDeviceId: null,
+    testedLocalVoiceInputDeviceLabel: null,
     lastOpenedDocumentPath: "C:\\docs\\Notes.txt",
     lastOpenedParagraphIndex: 4,
     hasSeenOnboarding: true
   });
+});
+
+test("parseReaderPersistenceState keeps the selected local voice microphone id", () => {
+  const parsed = parseReaderPersistenceState(JSON.stringify({
+    preferredLocalVoiceInputDeviceId:
+      '{"backend":"sounddevice","backendDeviceId":"4","defaultSampleRate":48000,"hostapiId":0,"hostapiName":"Windows WASAPI","index":4,"maxInputChannels":1,"name":"Desk Mic"}'
+  }));
+
+  assert.equal(
+    parsed.preferredLocalVoiceInputDeviceId,
+    '{"backend":"sounddevice","backendDeviceId":"4","defaultSampleRate":48000,"hostapiId":0,"hostapiName":"Windows WASAPI","index":4,"maxInputChannels":1,"name":"Desk Mic"}'
+  );
+});
+
+test("parseReaderPersistenceState keeps the selected local voice path preference", () => {
+  const parsed = parseReaderPersistenceState(JSON.stringify({
+    preferredLocalVoiceCommandPath: "experimentalV2"
+  }));
+
+  assert.equal(parsed.preferredLocalVoiceCommandPath, "experimentalV2");
+});
+
+test("parseReaderPersistenceState demotes persisted hands-free mode back to press to listen", () => {
+  const parsed = parseReaderPersistenceState(JSON.stringify({
+    preferredReaderVoiceMode: "handsFreeWakePhrase"
+  }));
+
+  assert.equal(parsed.preferredReaderVoiceMode, "pressToListen");
+});
+
+test("parseReaderPersistenceState keeps the selected hands-free wake phrase", () => {
+  const parsed = parseReaderPersistenceState(JSON.stringify({
+    preferredReaderWakePhrase: "reader"
+  }));
+
+  assert.equal(parsed.preferredReaderWakePhrase, "reader");
+});
+
+test("parseReaderPersistenceState keeps the tested local voice microphone identity and label", () => {
+  const parsed = parseReaderPersistenceState(JSON.stringify({
+    testedLocalVoiceInputDeviceId:
+      '{"backend":"sounddevice","backendDeviceId":"7","defaultSampleRate":48000,"hostapiId":0,"hostapiName":"Windows WASAPI","index":7,"maxInputChannels":2,"name":"SteelSeries Sonar - Stream"}',
+    testedLocalVoiceInputDeviceLabel: "SteelSeries Sonar - Stream"
+  }));
+
+  assert.equal(
+    parsed.testedLocalVoiceInputDeviceId,
+    '{"backend":"sounddevice","backendDeviceId":"7","defaultSampleRate":48000,"hostapiId":0,"hostapiName":"Windows WASAPI","index":7,"maxInputChannels":2,"name":"SteelSeries Sonar - Stream"}'
+  );
+  assert.equal(parsed.testedLocalVoiceInputDeviceLabel, "SteelSeries Sonar - Stream");
 });
 
 test("parseReaderPersistenceState falls back for invalid display preferences", () => {
